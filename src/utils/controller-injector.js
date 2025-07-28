@@ -34,9 +34,13 @@ class ControllerInjector {
                 throw new Error(`Tmux session '${sessionName}' not found`);
             }
 
-            // Send command to tmux session
+            // Send command to tmux session and execute it
             const escapedCommand = command.replace(/'/g, "'\\''");
-            execSync(`tmux send-keys -t ${sessionName} '${escapedCommand}' Enter`);
+            
+            // Send command first
+            execSync(`tmux send-keys -t ${sessionName} '${escapedCommand}'`);
+            // Then send Enter as separate command
+            execSync(`tmux send-keys -t ${sessionName} Enter`);
             
             this.logger.info(`Command injected to tmux session '${sessionName}'`);
             return true;
