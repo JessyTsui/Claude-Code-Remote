@@ -90,6 +90,22 @@ class SmartMonitor {
         }
     }
 
+    autoApproveDialog() {
+        try {
+            console.log('🤖 Auto-approving Claude tool usage dialog...');
+            
+            // Send "1" to select the first option (usually "Yes")
+            execSync(`tmux send-keys -t ${this.sessionName} '1'`, { encoding: 'utf8' });
+            setTimeout(() => {
+                execSync(`tmux send-keys -t ${this.sessionName} Enter`, { encoding: 'utf8' });
+            }, 100);
+            
+            console.log('✅ Auto-approval sent successfully');
+        } catch (error) {
+            console.error('❌ Failed to auto-approve dialog:', error.message);
+        }
+    }
+
     extractAllResponses(content) {
         const lines = content.split('\n');
         const responses = [];
@@ -97,7 +113,7 @@ class SmartMonitor {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             
-            // Look for Claude responses
+            // Look for standard Claude responses
             if (line.startsWith('⏺ ') && line.length > 2) {
                 const responseText = line.substring(2).trim();
                 
@@ -115,8 +131,55 @@ class SmartMonitor {
                     userQuestion,
                     claudeResponse: responseText,
                     lineIndex: i,
-                    responseId: `${userQuestion}-${responseText}`.substring(0, 50)
+                    responseId: `${userQuestion}-${responseText}`.substring(0, 50),
+                    type: 'standard'
                 });
+            }
+            
+            // Look for interactive dialogs/tool confirmations
+            if (line.includes('Do you want to proceed?') || 
+                line.includes('❯ 1. Yes') ||
+                line.includes('Tool use') ||
+                (line.includes('│') && (line.includes('serena') || line.includes('MCP') || line.includes('initial_instructions')))) {
+                
+                // Check if this is part of a tool use dialog
+                let dialogContent = '';
+                let userQuestion = 'Recent command';
+                
+                // Look backward to find the start of the dialog and user question
+                for (let j = i; j >= Math.max(0, i - 50); j--) {
+                    const prevLine = lines[j];
+                    if (prevLine.includes('╭') || prevLine.includes('Tool use')) {
+                        // Found start of dialog box, now collect all content
+                        for (let k = j; k <= Math.min(lines.length - 1, i + 20); k++) {
+                            if (lines[k].includes('╰')) {
+                                dialogContent += lines[k] + '\n';
+                                break; // End of dialog box
+                            }
+                            dialogContent += lines[k] + '\n';
+                        }
+                        break;
+                    }
+                    // Look for user question
+                    if (prevLine.startsWith('> ') && prevLine.length > 2) {
+                        userQuestion = prevLine.substring(2).trim();
+                    }
+                }
+                
+                if (dialogContent.length > 50) { // Only if we found substantial dialog
+                    // Auto-approve the dialog instead of asking user to go to iTerm2
+                    this.autoApproveDialog();
+                    
+                    responses.push({
+                        userQuestion,
+                        claudeResponse: 'Claude requested tool permission - automatically approved. Processing...',
+                        lineIndex: i,
+                        responseId: `dialog-${userQuestion}-${Date.now()}`.substring(0, 50),
+                        type: 'interactive',
+                        fullDialog: dialogContent.substring(0, 500)
+                    });
+                    break; // Only send one dialog notification per check
+                }
             }
         }
         
