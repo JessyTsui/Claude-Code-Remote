@@ -44,10 +44,12 @@
   },
   "telegram": {
     "type": "chat",
-    "enabled": false,
+    "enabled": true,
     "config": {
-      "token": "",
-      "chatId": ""
+      "botToken": "",
+      "chatId": "",
+      "groupId": "",
+      "whitelist": []
     }
   },
   "whatsapp": {
@@ -64,6 +66,17 @@
     "config": {
       "webhook": "",
       "secret": ""
+    }
+  },
+  "line": {
+    "type": "chat",
+    "enabled": true,
+    "config": {
+      "channelAccessToken": "",
+      "channelSecret": "",
+      "userId": "",
+      "groupId": "",
+      "whitelist": []
     }
   }
 }

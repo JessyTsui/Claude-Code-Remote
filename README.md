@@ -1,6 +1,6 @@
-# Claude Code Remote
+# Claude Code Remote - LINE Edition
 
-Control [Claude Code](https://claude.ai/code) remotely via email. Start tasks locally, receive notifications when Claude completes them, and send new commands by simply replying to emails.
+Control [Claude Code](https://claude.ai/code) remotely via LINE messages or email. Start tasks locally, receive notifications when Claude completes them, and send new commands by simply replying to LINE messages or emails.
 
 <div align="center">
   
@@ -18,10 +18,15 @@ Control [Claude Code](https://claude.ai/code) remotely via email. Start tasks lo
 
 ## ✨ Features
 
-- **📧 Email Notifications**: Get notified when Claude completes tasks
-- **🔄 Email Control**: Reply to emails to send new commands to Claude
-- **📱 Remote Access**: Control Claude from anywhere with just email
-- **🔒 Secure**: Whitelist-based sender verification
+- **📱 Multiple Messaging Platforms**: 
+  - LINE messages with token-based commands
+  - Telegram Bot with interactive buttons and slash commands
+  - Traditional email notifications
+- **🔄 Two-way Control**: Reply to messages or emails to send new commands
+- **📱 Remote Access**: Control Claude from anywhere
+- **🔒 Secure**: ID-based whitelist verification for all platforms
+- **👥 Group Support**: Use in LINE groups or Telegram groups for team collaboration
+- **🤖 Smart Commands**: Intuitive command formats for each platform
 - **📋 Multi-line Support**: Send complex commands with formatting
 
 ## 🚀 Quick Start
@@ -34,8 +39,39 @@ cd Claude-Code-Remote
 npm install
 ```
 
-### 2. Configure Email
+### 2. Choose Your Platform
 
+#### Option A: Configure Telegram (Recommended)
+See [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md) for detailed Telegram setup instructions.
+
+Quick setup:
+```bash
+# Copy example config
+cp .env.example .env
+
+# Edit with your Telegram credentials
+nano .env
+```
+
+**Required Telegram settings:**
+```env
+TELEGRAM_ENABLED=true
+TELEGRAM_BOT_TOKEN=your-bot-token
+TELEGRAM_CHAT_ID=your-chat-id
+```
+
+#### Option B: Configure LINE
+See [LINE_SETUP.md](LINE_SETUP.md) for detailed LINE setup instructions.
+
+**Required LINE settings:**
+```env
+LINE_ENABLED=true
+LINE_CHANNEL_ACCESS_TOKEN=your-token
+LINE_CHANNEL_SECRET=your-secret
+LINE_USER_ID=your-user-id
+```
+
+#### Option C: Configure Email
 ```bash
 # Copy example config
 cp .env.example .env
@@ -44,8 +80,9 @@ cp .env.example .env
 nano .env
 ```
 
-**Required settings:**
+**Required email settings:**
 ```env
+EMAIL_ENABLED=true
 SMTP_USER=your-email@gmail.com
 SMTP_PASS=your-app-password
 IMAP_USER=your-email@gmail.com  
@@ -57,7 +94,40 @@ SESSION_MAP_PATH=/your/path/to/Claude-Code-Remote/src/data/session-map.json
 
 📌 **Gmail users**: Use [App Passwords](https://myaccount.google.com/security), not your regular password.
 
-### 3. Configure Claude Code Hooks
+### 3. Start Platform Service
+
+#### Option A: Start All Enabled Platforms (Recommended)
+```bash
+# Automatically starts all enabled platforms
+npm run webhooks
+# or
+node start-all-webhooks.js
+```
+
+#### Option B: Start Individual Platforms
+
+**For Telegram:**
+```bash
+npm run telegram
+# or
+node start-telegram-webhook.js
+```
+
+**For LINE:**
+```bash
+npm run line
+# or
+node start-line-webhook.js
+```
+
+**For Email:**
+```bash
+npm run daemon:start
+# or
+node claude-remote.js daemon start
+```
+
+### 4. Configure Claude Code Hooks
 
 Add to `~/.claude/settings.json`:
 
