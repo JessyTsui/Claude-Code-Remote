@@ -92,10 +92,10 @@ class TmuxInjector {
                 // 3. Send enter
                 const enterCommand = `tmux send-keys -t ${this.sessionName} C-m`;
                 
-                this.log.info(`Injecting command via tmux: ${command}`);
-                this.log.info(`Step 1 - Clear: ${clearCommand}`);
-                this.log.info(`Step 2 - Send: ${sendCommand}`);
-                this.log.info(`Step 3 - Enter: ${enterCommand}`);
+                this.log.debug(`Injecting command via tmux: ${command}`);
+                // this.log.debug(`Step 1 - Clear: ${clearCommand}`);
+                // this.log.debug(`Step 2 - Send: ${sendCommand}`);
+                // this.log.debug(`Step 3 - Enter: ${enterCommand}`);
                 
                 // Execute three steps
                 exec(clearCommand, (clearError) => {
@@ -123,7 +123,7 @@ class TmuxInjector {
                                         return;
                                     }
                                     
-                                    this.log.info('Command sent successfully in 3 steps');
+                                    this.log.debug('Command sent successfully in 3 steps');
                                     
                                     // Brief wait for command sending
                                     await new Promise(r => setTimeout(r, 1000));
@@ -131,7 +131,7 @@ class TmuxInjector {
                                     // Check if command is already displayed in Claude
                                     const capture = await this.getCaptureOutput();
                                     if (capture.success) {
-                                        this.log.info(`Claude state after injection: ${capture.output.slice(-200).replace(/\n/g, ' ')}`);
+                                        this.log.debug(`Claude state after injection: ${capture.output.slice(-200).replace(/\n/g, ' ')}`);
                                     }
                                     
                                     // Wait and check if confirmation is needed
@@ -172,7 +172,7 @@ class TmuxInjector {
             }
             
             const output = capture.output;
-            this.log.info(`Confirmation check ${attempts}: ${output.slice(-200).replace(/\n/g, ' ')}`);
+            this.log.debug(`Confirmation check ${attempts}: ${output.slice(-200).replace(/\n/g, ' ')}`);
             
             // Check for multi-option confirmation dialog (priority handling)
             if (output.includes('Do you want to proceed?') && 
@@ -297,7 +297,7 @@ class TmuxInjector {
                 !output.includes('Do you want to proceed?') &&
                 !output.includes('1. Yes') &&
                 !output.includes('(y/n)')) {
-                this.log.info('New input prompt detected, command likely completed');
+                this.log.debug('New input prompt detected, command likely completed');
                 break;
             }
             
@@ -319,7 +319,7 @@ class TmuxInjector {
         // Final state check
         const finalCapture = await this.getCaptureOutput();
         if (finalCapture.success) {
-            this.log.info(`Final state: ${finalCapture.output.slice(-100).replace(/\n/g, ' ')}`);
+            this.log.debug(`Final state: ${finalCapture.output.slice(-100).replace(/\n/g, ' ')}`);
         }
     }
     
@@ -358,7 +358,7 @@ class TmuxInjector {
     // Complete command injection workflow
     async injectCommandFull(token, command) {
         try {
-            this.log.info(`🎯 Starting tmux command injection (Token: ${token})`);
+            this.log.debug(`Starting tmux command injection (Token: ${token})`);
             
             // 1. Check if tmux is available
             const tmuxAvailable = await this.checkTmuxAvailable();

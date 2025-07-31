@@ -28,6 +28,7 @@ const log = pino({
 // Global configuration
 const SESS_PATH = process.env.SESSION_MAP_PATH || path.join(__dirname, '../data/session-map.json');
 const PROCESSED_PATH = path.join(__dirname, '../data/processed-messages.json');
+const SENT_MESSAGES_PATH = path.join(__dirname, '../data/sent-messages.json');
 const ALLOWED_SENDERS = (process.env.ALLOWED_SENDERS || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 const PTY_POOL = new Map();
 let PROCESSED_MESSAGES = new Set();
@@ -391,9 +392,17 @@ async function fallbackToClipboard(command) {
 async function handleMailMessage(parsed) {
     try {
         log.debug({ uid: parsed.uid, messageId: parsed.messageId }, 'handleMailMessage called');
+        
+        // Check if this is a system-sent email
+        const messageId = parsed.messageId;
+        if (await isSystemSentEmail(messageId)) {
+            log.info({ messageId }, 'Skipping system-sent email');
+            await removeFromSentMessages(messageId);
+            return;
+        }
+        
         // Simplified duplicate detection (UID already checked earlier)
         const uid = parsed.uid;
-        const messageId = parsed.messageId;
         
         // Only perform additional checks for emails without UID
         if (!uid) {
@@ -689,6 +698,44 @@ function fetchAndProcessEmails(imap, uids) {
     fetch.once('end', function() {
         log.debug('Email fetch completed');
     });
+}
+
+// Check if email is system-sent
+async function isSystemSentEmail(messageId) {
+    if (!messageId || !existsSync(SENT_MESSAGES_PATH)) {
+        return false;
+    }
+    
+    try {
+        const sentMessages = JSON.parse(readFileSync(SENT_MESSAGES_PATH, 'utf8'));
+        return sentMessages.messages.some(msg => msg.messageId === messageId);
+    } catch (error) {
+        log.error({ error }, 'Error reading sent messages');
+        return false;
+    }
+}
+
+// Remove email from sent messages tracking
+async function removeFromSentMessages(messageId) {
+    if (!existsSync(SENT_MESSAGES_PATH)) {
+        return;
+    }
+    
+    try {
+        const sentMessages = JSON.parse(readFileSync(SENT_MESSAGES_PATH, 'utf8'));
+        sentMessages.messages = sentMessages.messages.filter(msg => msg.messageId !== messageId);
+        
+        // Also clean up old messages (older than 24 hours)
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        sentMessages.messages = sentMessages.messages.filter(msg => {
+            return new Date(msg.sentAt) > oneDayAgo;
+        });
+        
+        writeFileSync(SENT_MESSAGES_PATH, JSON.stringify(sentMessages, null, 2));
+        log.debug({ messageId }, 'Removed message from sent tracking');
+    } catch (error) {
+        log.error({ error }, 'Error removing from sent messages');
+    }
 }
 
 // Start service

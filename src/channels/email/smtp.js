@@ -17,6 +17,7 @@ class EmailChannel extends NotificationChannel {
         this.transporter = null;
         this.sessionsDir = path.join(__dirname, '../../data/sessions');
         this.templatesDir = path.join(__dirname, '../../assets/email-templates');
+        this.sentMessagesPath = config.sentMessagesPath || path.join(__dirname, '../../data/sent-messages.json');
         this.tmuxMonitor = new TmuxMonitor();
         
         this._ensureDirectories();
@@ -114,12 +115,16 @@ class EmailChannel extends NotificationChannel {
         // Generate email content
         const emailContent = this._generateEmailContent(notification, sessionId, token);
         
+        // Generate unique Message-ID
+        const messageId = `<${sessionId}-${Date.now()}@claude-code-remote>`;
+        
         const mailOptions = {
             from: this.config.from || this.config.smtp.auth.user,
             to: this.config.to,
             subject: emailContent.subject,
             html: emailContent.html,
             text: emailContent.text,
+            messageId: messageId,
             // Add custom headers for reply recognition
             headers: {
                 'X-Claude-Code-Remote-Session-ID': sessionId,
@@ -130,6 +135,10 @@ class EmailChannel extends NotificationChannel {
         try {
             const result = await this.transporter.sendMail(mailOptions);
             this.logger.info(`Email sent successfully to ${this.config.to}, Session: ${sessionId}`);
+            
+            // Track sent message
+            await this._trackSentMessage(messageId, sessionId, token);
+            
             return true;
         } catch (error) {
             this.logger.error('Failed to send email:', error.message);
@@ -203,6 +212,38 @@ class EmailChannel extends NotificationChannel {
             fs.unlinkSync(sessionFile);
             this.logger.debug(`Session removed: ${sessionId}`);
         }
+    }
+
+    async _trackSentMessage(messageId, sessionId, token) {
+        let sentMessages = { messages: [] };
+        
+        // Read existing data if file exists
+        if (fs.existsSync(this.sentMessagesPath)) {
+            try {
+                sentMessages = JSON.parse(fs.readFileSync(this.sentMessagesPath, 'utf8'));
+            } catch (e) {
+                this.logger.warn('Failed to read sent-messages.json, creating new one');
+            }
+        }
+        
+        // Add new message
+        sentMessages.messages.push({
+            messageId: messageId,
+            sessionId: sessionId,
+            token: token,
+            type: 'notification',
+            sentAt: new Date().toISOString()
+        });
+        
+        // Ensure directory exists
+        const dir = path.dirname(this.sentMessagesPath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        
+        // Write updated data
+        fs.writeFileSync(this.sentMessagesPath, JSON.stringify(sentMessages, null, 2));
+        this.logger.debug(`Tracked sent message: ${messageId}`);
     }
 
     _generateEmailContent(notification, sessionId, token) {
