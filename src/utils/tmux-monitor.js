@@ -112,9 +112,6 @@ class TmuxMonitor {
      */
     getFullExecutionTrace(sessionName, lines = 1000) {
         try {
-            // Get last user input timestamp
-            const lastInputTime = this.traceCapture.getLastUserInputTime(sessionName);
-            
             let content;
             if (!fs.existsSync(path.join(this.captureDir, `${sessionName}.log`))) {
                 // If no capture file, try to get from tmux buffer
@@ -124,10 +121,8 @@ class TmuxMonitor {
                 content = fs.readFileSync(path.join(this.captureDir, `${sessionName}.log`), 'utf8');
             }
             
-            // If we have a user input timestamp, filter content to only show after that time
-            if (lastInputTime) {
-                content = this._filterByTimestamp(content, lastInputTime);
-            }
+            // Always filter content to only show from last user input
+            content = this._filterByTimestamp(content);
             
             // Clean up the trace by removing the command prompt box
             return this._cleanExecutionTrace(content);
@@ -138,29 +133,32 @@ class TmuxMonitor {
     }
     
     /**
-     * Filter content to only include lines after a certain timestamp
+     * Filter content to only include lines after the last user input
      * @param {string} content - The full content
-     * @param {number} timestamp - Unix timestamp in milliseconds
+     * @param {number} timestamp - Unix timestamp in milliseconds (not used in current implementation)
      * @returns {string} - Filtered content
      */
     _filterByTimestamp(content, timestamp) {
         const lines = content.split('\n');
-        let capture = false;
-        let filteredLines = [];
+        let lastUserInputIndex = -1;
         
-        for (const line of lines) {
-            // Check if this line contains a user input marker
-            if (line.includes('> ') && !capture) {
-                // Simple heuristic: if we see user input, start capturing
-                capture = true;
-            }
-            
-            if (capture) {
-                filteredLines.push(line);
+        // Find the LAST occurrence of user input (line starting with "> ")
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i];
+            // Check for user input pattern: "> " at the start of the line
+            if (line.startsWith('> ') && line.length > 2) {
+                lastUserInputIndex = i;
+                break;
             }
         }
         
-        return filteredLines.join('\n');
+        // If we found user input, return everything from that point
+        if (lastUserInputIndex >= 0) {
+            return lines.slice(lastUserInputIndex).join('\n');
+        }
+        
+        // If no user input found, return last 100 lines as fallback
+        return lines.slice(-100).join('\n');
     }
     
     /**
