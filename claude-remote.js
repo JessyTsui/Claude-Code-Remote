@@ -207,11 +207,13 @@ class ClaudeCodeRemoteCLI {
             // Use TmuxMonitor to capture conversation
             const tmuxMonitor = new TmuxMonitor();
             const conversation = tmuxMonitor.getRecentConversation(currentSession);
+            const fullTrace = tmuxMonitor.getFullExecutionTrace(currentSession);
             
             return {
                 userQuestion: conversation.userQuestion,
                 claudeResponse: conversation.claudeResponse,
-                tmuxSession: currentSession
+                tmuxSession: currentSession,
+                fullExecutionTrace: fullTrace
             };
         } catch (error) {
             this.logger.debug('Failed to capture conversation:', error.message);

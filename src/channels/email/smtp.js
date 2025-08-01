@@ -114,10 +114,12 @@ class EmailChannel extends NotificationChannel {
         const tmuxSession = this._getCurrentTmuxSession();
         if (tmuxSession && !notification.metadata) {
             const conversation = this.tmuxMonitor.getRecentConversation(tmuxSession);
+            const fullTrace = this.tmuxMonitor.getFullExecutionTrace(tmuxSession);
             notification.metadata = {
                 userQuestion: conversation.userQuestion || notification.message,
                 claudeResponse: conversation.claudeResponse || notification.message,
-                tmuxSession: tmuxSession
+                tmuxSession: tmuxSession,
+                fullExecutionTrace: fullTrace
             };
         }
         
@@ -299,7 +301,9 @@ class EmailChannel extends NotificationChannel {
             claudeResponse: claudeResponse || notification.message,
             projectDir: projectDir,
             shortQuestion: shortQuestion || 'No specific question',
-            subagentActivities: notification.metadata?.subagentActivities || ''
+            subagentActivities: notification.metadata?.subagentActivities || '',
+            fullExecutionTrace: notification.metadata?.fullExecutionTrace || 
+                'No execution trace available. This may occur if the task completed very quickly or if tmux session logging is not enabled.'
         };
 
         let subject = enhancedSubject;
@@ -373,6 +377,42 @@ class EmailChannel extends NotificationChannel {
                             
                             {{subagentActivities}}
                             
+                            <!-- Full Execution Trace -->
+                            <div style="margin: 20px 0; background-color: #1f1f1f; border: 1px solid #444; border-radius: 4px;">
+                                <div style="padding: 15px; color: #ff9800; font-weight: bold; border-bottom: 1px solid #444;">
+                                    📋 Full Execution Trace
+                                </div>
+                                <div style="padding: 15px;">
+                                    <div style="color: #999; margin-bottom: 10px; font-size: 12px;">
+                                        Complete terminal output showing all interactions and reasoning:
+                                    </div>
+                                    <div style="background-color: #0d0d0d; padding: 15px; border: 1px solid #333; border-radius: 4px; max-height: 400px; overflow-y: scroll; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #666 #1a1a1a;">
+                                        <style>
+                                            /* Webkit browsers (Chrome, Safari) */
+                                            div::-webkit-scrollbar {
+                                                width: 12px;
+                                                height: 12px;
+                                            }
+                                            div::-webkit-scrollbar-track {
+                                                background: #1a1a1a;
+                                                border-radius: 6px;
+                                            }
+                                            div::-webkit-scrollbar-thumb {
+                                                background: #666;
+                                                border-radius: 6px;
+                                            }
+                                            div::-webkit-scrollbar-thumb:hover {
+                                                background: #888;
+                                            }
+                                        </style>
+                                        <pre style="margin: 0; color: #ccc; font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word;">{{fullExecutionTrace}}</pre>
+                                    </div>
+                                    <div style="color: #666; font-size: 11px; margin-top: 10px; text-align: center;">
+                                        Scroll to view more • Max height: 400px
+                                    </div>
+                                </div>
+                            </div>
+                            
                             <!-- Continue Instructions -->
                             <div style="margin: 30px 0 20px 0; border-top: 1px solid #333; padding-top: 20px;">
                                 <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code help --continue</span><br>
@@ -416,6 +456,10 @@ Status: {{type}}
 {{claudeResponse}}
 
 {{subagentActivities}}
+
+====== FULL EXECUTION TRACE ======
+{{fullExecutionTrace}}
+==================================
 
 How to Continue Conversation:
 To continue conversation with Claude Code, please reply to this email directly and enter your instructions in the email body.
@@ -553,7 +597,29 @@ Security Note: Please do not forward this email, session will automatically expi
                 project: 'Claude-Code-Remote-Test',
                 metadata: {
                     test: true,
-                    timestamp: new Date().toISOString()
+                    timestamp: new Date().toISOString(),
+                    userQuestion: 'This is a test notification',
+                    claudeResponse: 'Email notification system is working correctly.',
+                    fullExecutionTrace: `> claude-remote test
+
+🧪 Testing email notification system...
+
+[2025-08-01T06:29:28.893Z] [Config] [INFO] Configuration loaded successfully
+[2025-08-01T06:29:28.918Z] [Notifier] [INFO] Initialized 2 channels
+[2025-08-01T06:29:29.015Z] [Channel:desktop] [INFO] Notification sent successfully
+[2025-08-01T06:29:32.880Z] [Channel:email] [INFO] Email sent successfully
+
+✅ Test completed successfully!
+
+This is a test trace to demonstrate how the full execution trace will appear in actual usage.
+When Claude Code completes a task, this section will contain the complete terminal output including:
+- User commands
+- Claude's responses
+- Subagent activities
+- Error messages
+- Debug information
+
+The trace provides complete transparency about what happened during task execution.`
                 }
             };
 

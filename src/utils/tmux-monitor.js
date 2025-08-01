@@ -103,6 +103,82 @@ class TmuxMonitor {
     }
 
     /**
+     * Get full execution trace from tmux session
+     * @param {string} sessionName - The tmux session name
+     * @param {number} lines - Number of lines to retrieve
+     * @returns {string} - Full execution trace
+     */
+    getFullExecutionTrace(sessionName, lines = 1000) {
+        try {
+            const captureFile = path.join(this.captureDir, `${sessionName}.log`);
+            
+            let content;
+            if (!fs.existsSync(captureFile)) {
+                // If no capture file, try to get from tmux buffer
+                content = this.getFullTraceFromTmuxBuffer(sessionName, lines);
+            } else {
+                // Read the capture file
+                content = fs.readFileSync(captureFile, 'utf8');
+            }
+            
+            // Clean up the trace by removing the command prompt box
+            return this._cleanExecutionTrace(content);
+        } catch (error) {
+            console.error(`Failed to get full trace for session ${sessionName}:`, error.message);
+            return '';
+        }
+    }
+    
+    /**
+     * Clean execution trace by removing command prompt and status line
+     * @param {string} trace - Raw execution trace
+     * @returns {string} - Cleaned trace
+     */
+    _cleanExecutionTrace(trace) {
+        const lines = trace.split('\n');
+        const cleanedLines = [];
+        let skipRemaining = false;
+        
+        for (const line of lines) {
+            // Check if we've hit the command prompt box
+            if (line.includes('╭─') && line.includes('─╮')) {
+                skipRemaining = true;
+                break;
+            }
+            
+            // Skip empty command prompt lines
+            if (line.match(/^│\s*>\s*│$/)) {
+                skipRemaining = true;
+                break;
+            }
+            
+            cleanedLines.push(line);
+        }
+        
+        return cleanedLines.join('\n').trim();
+    }
+
+    /**
+     * Get full trace from tmux buffer
+     * @param {string} sessionName - The tmux session name
+     * @param {number} lines - Number of lines to retrieve
+     */
+    getFullTraceFromTmuxBuffer(sessionName, lines = 1000) {
+        try {
+            // Capture the pane contents
+            const buffer = execSync(`tmux capture-pane -t ${sessionName} -p -S -${lines}`, {
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore']
+            });
+
+            return buffer;
+        } catch (error) {
+            console.error(`Failed to get tmux buffer for session ${sessionName}:`, error.message);
+            return '';
+        }
+    }
+
+    /**
      * Extract user question and Claude response from captured text
      * @param {string} text - The captured text
      * @returns {Object} - { userQuestion, claudeResponse }
