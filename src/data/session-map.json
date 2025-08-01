@@ -268,5 +268,23 @@
     "sessionId": "fec19c5e-1c8a-4293-b2d2-86eb7b8f08d9",
     "tmuxSession": "WavJaby",
     "description": "completed - Claude-Code-Remote-Test"
+  },
+  "LO21OWHS": {
+    "type": "pty",
+    "createdAt": 1754043557,
+    "expiresAt": 1754129957,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "69b78403-7d4c-41f0-b1a0-535483486279",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "LP7CIOWZ": {
+    "type": "pty",
+    "createdAt": 1754044082,
+    "expiresAt": 1754130482,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "7813d8cd-e08c-41c0-a7ca-179c8406cf75",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
   }
 }

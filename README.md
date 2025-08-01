@@ -244,6 +244,25 @@ Works with any email client that supports standard reply functionality:
 - ✅ Outlook
 - ✅ Any SMTP-compatible email client
 
+### Advanced Configuration
+
+**Subagent Activities in Email**
+
+By default, email notifications only show the execution trace. You can optionally enable a separate subagent activities summary section:
+
+```json
+// In your config/config.json
+{
+  "showSubagentActivitiesInEmail": true  // Default: false
+}
+```
+
+When enabled, emails will include:
+- **Subagent Activities Summary**: A structured list of all subagent activities
+- **Full Execution Trace**: The complete terminal output
+
+Since the execution trace already contains all information, this feature is disabled by default to keep emails concise.
+
 ## 💡 Common Use Cases
 
 - **Remote Development**: Start coding at the office, continue from home via email

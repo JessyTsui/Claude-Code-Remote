@@ -429,7 +429,6 @@ Status: {{type}}
 
 {{subagentActivities}}
 
-<<<<<<< HEAD
 ====== FULL EXECUTION TRACE ======
 {{fullExecutionTrace}}
 ==================================
