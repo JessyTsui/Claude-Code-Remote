@@ -286,7 +286,8 @@ class EmailChannel extends NotificationChannel {
             userQuestion: userQuestion || 'No specified task',
             claudeResponse: claudeResponse || notification.message,
             projectDir: projectDir,
-            shortQuestion: shortQuestion || 'No specific question'
+            shortQuestion: shortQuestion || 'No specific question',
+            subagentActivities: notification.metadata?.subagentActivities || ''
         };
 
         let subject = enhancedSubject;
@@ -356,6 +357,8 @@ class EmailChannel extends NotificationChannel {
                                 </div>
                             </div>
                             
+                            {{subagentActivities}}
+                            
                             <!-- Continue Instructions -->
                             <div style="margin: 30px 0 20px 0; border-top: 1px solid #333; padding-top: 20px;">
                                 <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code help --continue</span><br>
@@ -397,6 +400,8 @@ Status: {{type}}
 
 🤖 Claude's Response:
 {{claudeResponse}}
+
+{{subagentActivities}}
 
 How to Continue Conversation:
 To continue conversation with Claude Code, please reply to this email directly and enter your instructions in the email body.

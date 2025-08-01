@@ -113,7 +113,10 @@ class ClaudeCodeRemoteCLI {
             process.exit(1);
         }
 
-        // Check if this is a subagent notification and if they're disabled
+        // Automatically capture current tmux session conversation content
+        const metadata = await this.captureCurrentConversation();
+
+        // Handle subagent notifications
         if (type === 'waiting') {
             const Config = require('./src/core/config');
             const config = new Config();
@@ -121,13 +124,45 @@ class ClaudeCodeRemoteCLI {
             const enableSubagentNotifications = config.get('enableSubagentNotifications', false);
             
             if (!enableSubagentNotifications) {
-                this.logger.info('Subagent notifications are disabled, skipping notification');
+                // Instead of skipping, track the subagent activity
+                const SubagentTracker = require('./src/utils/subagent-tracker');
+                const tracker = new SubagentTracker();
+                
+                // Use tmux session as the tracking key
+                const trackingKey = metadata.tmuxSession || 'default';
+                
+                tracker.addActivity(trackingKey, {
+                    type: 'SubagentStop',
+                    description: metadata.userQuestion || 'Subagent task',
+                    details: {
+                        claudeResponse: metadata.claudeResponse ? 
+                            (metadata.claudeResponse.substring(0, 200) + '...') : 
+                            'No response captured',
+                        timestamp: new Date().toISOString()
+                    }
+                });
+                
+                this.logger.info(`Subagent activity tracked for tmux session: ${trackingKey}`);
                 process.exit(0);
             }
         }
-
-        // Automatically capture current tmux session conversation content
-        const metadata = await this.captureCurrentConversation();
+        
+        // For completed notifications, include subagent activities
+        if (type === 'completed') {
+            const SubagentTracker = require('./src/utils/subagent-tracker');
+            const tracker = new SubagentTracker();
+            const trackingKey = metadata.tmuxSession || 'default';
+            
+            // Get and format subagent activities
+            const subagentSummary = tracker.formatActivitiesForEmail(trackingKey);
+            if (subagentSummary) {
+                metadata.subagentActivities = subagentSummary;
+                this.logger.info('Including subagent activities in completion email');
+                
+                // Clear activities after including them
+                tracker.clearActivities(trackingKey);
+            }
+        }
         
         const result = await this.notifier.notify(type, metadata);
         

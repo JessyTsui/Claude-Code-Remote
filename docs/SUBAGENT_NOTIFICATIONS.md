@@ -4,6 +4,14 @@
 
 When Claude Code executes subagent tasks, it triggers `SubagentStop` hooks which send "waiting" notifications. This can be noisy and distracting for some users.
 
+By default, subagent notifications are disabled, but their activities are tracked and included in the completion email. This gives you a complete picture of what happened during task execution without the notification noise.
+
+## How It Works
+
+1. **Subagent activities are tracked** - When subagents run, their activities are recorded
+2. **No separate notifications** - You won't receive individual emails for each subagent
+3. **Activities included in completion email** - When the main task completes, all subagent activities are summarized in the email
+
 ## Configuration
 
 You can control whether subagent notifications are sent by modifying the `enableSubagentNotifications` setting in your configuration.
