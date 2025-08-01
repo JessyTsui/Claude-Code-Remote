@@ -1,3 +1,18 @@
 {
-  "messages": []
+  "messages": [
+    {
+      "messageId": "<52d15aa1-d5a4-4d7d-8f01-4752d7d5fc6f-1754021037319@claude-code-remote>",
+      "sessionId": "52d15aa1-d5a4-4d7d-8f01-4752d7d5fc6f",
+      "token": "49WUF9NS",
+      "type": "notification",
+      "sentAt": "2025-08-01T04:03:59.850Z"
+    },
+    {
+      "messageId": "<eba8744e-8cc1-4fad-9dc8-69d558c51cca-1754021210179@claude-code-remote>",
+      "sessionId": "eba8744e-8cc1-4fad-9dc8-69d558c51cca",
+      "token": "N9PHUN4Q",
+      "type": "notification",
+      "sentAt": "2025-08-01T04:06:52.776Z"
+    }
+  ]
 }

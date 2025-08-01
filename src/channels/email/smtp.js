@@ -310,20 +310,20 @@ class EmailChannel extends NotificationChannel {
             completed: {
                 subject: '[Claude-Code-Remote #{{token}}] Claude Code Task Completed - {{project}}',
                 html: `
-                <div style="font-family: 'Consolas', 'Monaco', 'Courier New', monospace; background-color: #0c0c0c; color: #00ff00; padding: 0; margin: 0;">
-                    <div style="max-width: 900px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333; box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);">
+                <div style="font-family: 'Consolas', 'Monaco', 'Courier New', monospace; background-color: #f5f5f5; padding: 0; margin: 0;">
+                    <div style="max-width: 900px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);">
                         <!-- Terminal Header -->
-                        <div style="background-color: #2d2d2d; padding: 10px 15px; border-bottom: 1px solid #444; display: flex; align-items: center;">
-                            <div style="display: flex; gap: 8px; margin-right: 20px;">
-                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56;"></div>
-                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e;"></div>
-                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f;"></div>
+                        <div style="background-color: #2d2d2d; padding: 10px 15px; border-bottom: 1px solid #444;">
+                            <div style="display: inline-flex; align-items: center;">
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56; margin-right: 8px;"></span>
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e; margin-right: 8px;"></span>
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f; margin-right: 20px;"></span>
+                                <span style="color: #999; font-size: 14px;">claude-code-remote@{{project}} - Task Completed</span>
                             </div>
-                            <div style="color: #999; font-size: 14px;">claude-code-remote@{{project}} - Task Completed</div>
                         </div>
                         
                         <!-- Terminal Content -->
-                        <div style="padding: 20px; background-color: #0c0c0c; min-height: 400px;">
+                        <div style="padding: 20px; background-color: #1a1a1a; min-height: 400px;">
                             <!-- Session Info -->
                             <div style="color: #00ff00; margin-bottom: 20px;">
                                 <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code status</span><br>
@@ -338,7 +338,7 @@ class EmailChannel extends NotificationChannel {
                             <!-- User Input -->
                             <div style="margin: 20px 0;">
                                 <span style="color: #999;">$</span> <span style="color: #00ff00;">cat user_input.txt</span><br>
-                                <div style="background-color: #1a1a1a; border-left: 3px solid #ff9800; padding: 10px 15px; margin: 10px 0; color: #f0f0f0; white-space: pre-wrap; word-wrap: break-word;">{{userQuestion}}</div>
+                                <div style="background-color: #262626; border-left: 3px solid #ff9800; padding: 10px 15px; margin: 10px 0; color: #f0f0f0; white-space: pre-wrap; word-wrap: break-word;">{{userQuestion}}</div>
                             </div>
                             
                             <!-- Claude Response -->
@@ -348,7 +348,7 @@ class EmailChannel extends NotificationChannel {
                                     <span style="color: #00bcd4;">[INFO]</span> Processing request...<br>
                                     <span style="color: #00bcd4;">[INFO]</span> Executing task...
                                 </div>
-                                <div style="background-color: #1a1a1a; border-left: 3px solid #00ff00; padding: 15px; margin: 10px 0; color: #f0f0f0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; font-size: 14px; line-height: 1.6;">{{claudeResponse}}</div>
+                                <div style="background-color: #262626; border-left: 3px solid #00ff00; padding: 15px; margin: 10px 0; color: #f0f0f0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; font-size: 14px; line-height: 1.6;">{{claudeResponse}}</div>
                                 <div style="color: #00ff00; margin-top: 10px;">
                                     <span style="color: #00bcd4;">[SUCCESS]</span> Task completed successfully ✓
                                 </div>
@@ -359,7 +359,7 @@ class EmailChannel extends NotificationChannel {
                                 <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code help --continue</span><br>
                                 <div style="color: #f0f0f0; margin: 10px 0;">
                                     <div style="color: #ff9800; margin-bottom: 10px;">→ TO CONTINUE THIS SESSION:</div>
-                                    <div style="background-color: #1a1a1a; padding: 15px; border: 1px solid #333; margin: 10px 0;">
+                                    <div style="background-color: #262626; padding: 15px; border: 1px solid #333; margin: 10px 0;">
                                         Reply to this email directly with your next instruction.<br><br>
                                         <span style="color: #999;">Examples:</span><br>
                                         <span style="color: #00ff00;">  • "Add error handling to the function"</span><br>
@@ -411,20 +411,20 @@ Security Note: Please do not forward this email, session will automatically expi
             waiting: {
                 subject: '[Claude-Code-Remote #{{token}}] Claude Code Waiting for Input - {{project}}',
                 html: `
-                <div style="font-family: 'Consolas', 'Monaco', 'Courier New', monospace; background-color: #0c0c0c; color: #00ff00; padding: 0; margin: 0;">
-                    <div style="max-width: 900px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333; box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);">
+                <div style="font-family: 'Consolas', 'Monaco', 'Courier New', monospace; background-color: #f5f5f5; padding: 0; margin: 0;">
+                    <div style="max-width: 900px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);">
                         <!-- Terminal Header -->
-                        <div style="background-color: #2d2d2d; padding: 10px 15px; border-bottom: 1px solid #444; display: flex; align-items: center;">
-                            <div style="display: flex; gap: 8px; margin-right: 20px;">
-                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56;"></div>
-                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e;"></div>
-                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f;"></div>
+                        <div style="background-color: #2d2d2d; padding: 10px 15px; border-bottom: 1px solid #444;">
+                            <div style="display: inline-flex; align-items: center;">
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56; margin-right: 8px;"></span>
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e; margin-right: 8px;"></span>
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f; margin-right: 20px;"></span>
+                                <span style="color: #999; font-size: 14px;">claude-code-remote@{{project}} - Waiting for Input</span>
                             </div>
-                            <div style="color: #999; font-size: 14px;">claude-code-remote@{{project}} - Waiting for Input</div>
                         </div>
                         
                         <!-- Terminal Content -->
-                        <div style="padding: 20px; background-color: #0c0c0c; min-height: 400px;">
+                        <div style="padding: 20px; background-color: #1a1a1a; min-height: 400px;">
                             <!-- Session Info -->
                             <div style="color: #00ff00; margin-bottom: 20px;">
                                 <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code status</span><br>
@@ -442,7 +442,7 @@ Security Note: Please do not forward this email, session will automatically expi
                                 <div style="color: #ffeb3b; margin: 10px 0;">
                                     <span style="color: #ff9800;">[WAITING]</span> Claude needs your input to continue...<br>
                                 </div>
-                                <div style="background-color: #1a1a1a; border-left: 3px solid #ffeb3b; padding: 15px; margin: 10px 0; color: #f0f0f0;">
+                                <div style="background-color: #262626; border-left: 3px solid #ffeb3b; padding: 15px; margin: 10px 0; color: #f0f0f0;">
                                     {{message}}
                                 </div>
                             </div>
@@ -452,7 +452,7 @@ Security Note: Please do not forward this email, session will automatically expi
                                 <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code help --respond</span><br>
                                 <div style="color: #f0f0f0; margin: 10px 0;">
                                     <div style="color: #ff9800; margin-bottom: 10px;">→ ACTION REQUIRED:</div>
-                                    <div style="background-color: #1a1a1a; padding: 15px; border: 1px solid #333; margin: 10px 0;">
+                                    <div style="background-color: #262626; padding: 15px; border: 1px solid #333; margin: 10px 0;">
                                         <span style="color: #ffeb3b;">Claude is waiting for your guidance.</span><br><br>
                                         Reply to this email with your instructions to continue.
                                     </div>
