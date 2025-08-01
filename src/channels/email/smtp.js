@@ -314,12 +314,14 @@ class EmailChannel extends NotificationChannel {
                     <div style="max-width: 900px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);">
                         <!-- Terminal Header -->
                         <div style="background-color: #2d2d2d; padding: 10px 15px; border-bottom: 1px solid #444;">
-                            <div style="display: inline-flex; align-items: center;">
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56; margin-right: 6px;"></span>
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e; margin-right: 6px;"></span>
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f; margin-right: 12px;"></span>
-                                <span style="color: #999; font-size: 14px;">claude-code-remote@{{project}} - Task Completed</span>
-                            </div>
+                            <table style="display: inline-table; vertical-align: middle;" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td style="padding: 0;"><div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56;"></div></td>
+                                    <td style="padding: 0 0 0 5px;"><div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e;"></div></td>
+                                    <td style="padding: 0 0 0 5px;"><div style="width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f;"></div></td>
+                                    <td style="padding: 0 0 0 12px; color: #999; font-size: 14px; white-space: nowrap;">claude-code-remote@{{project}} - Task Completed</td>
+                                </tr>
+                            </table>
                         </div>
                         
                         <!-- Terminal Content -->
@@ -415,12 +417,14 @@ Security Note: Please do not forward this email, session will automatically expi
                     <div style="max-width: 900px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);">
                         <!-- Terminal Header -->
                         <div style="background-color: #2d2d2d; padding: 10px 15px; border-bottom: 1px solid #444;">
-                            <div style="display: inline-flex; align-items: center;">
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56; margin-right: 6px;"></span>
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e; margin-right: 6px;"></span>
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f; margin-right: 12px;"></span>
-                                <span style="color: #999; font-size: 14px;">claude-code-remote@{{project}} - Waiting for Input</span>
-                            </div>
+                            <table style="display: inline-table; vertical-align: middle;" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td style="padding: 0;"><div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56;"></div></td>
+                                    <td style="padding: 0 0 0 5px;"><div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e;"></div></td>
+                                    <td style="padding: 0 0 0 5px;"><div style="width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f;"></div></td>
+                                    <td style="padding: 0 0 0 12px; color: #999; font-size: 14px; white-space: nowrap;">claude-code-remote@{{project}} - Waiting for Input</td>
+                                </tr>
+                            </table>
                         </div>
                         
                         <!-- Terminal Content -->
