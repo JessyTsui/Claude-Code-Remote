@@ -47,9 +47,11 @@ build/
 
 # Temporary files
 tmp/
-temp/src/data/sessions/
-src/data/processed-messages.json
-src/data/session-map.json
-src/data/sessions/*.json
+temp/
 
+# Data files (session-specific, should not be committed)
+src/data/
+!src/data/.gitkeep
+
+# Claude configuration (user-specific)
 CLAUDE.md

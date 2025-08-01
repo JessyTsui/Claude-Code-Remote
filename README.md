@@ -249,22 +249,44 @@ Works with any email client that supports standard reply functionality:
 
 ### Advanced Configuration
 
-**Subagent Activities in Email**
+**Email Notification Options**
 
-By default, email notifications only show the execution trace. You can optionally enable a separate subagent activities summary section:
+1. **Subagent Activities in Email**
 
-```json
-// In your config/config.json
-{
-  "showSubagentActivitiesInEmail": true  // Default: false
-}
-```
+   By default, email notifications only show the execution trace. You can optionally enable a separate subagent activities summary section:
 
-When enabled, emails will include:
-- **Subagent Activities Summary**: A structured list of all subagent activities
-- **Full Execution Trace**: The complete terminal output
+   ```json
+   // In your config/config.json
+   {
+     "showSubagentActivitiesInEmail": true  // Default: false
+   }
+   ```
 
-Since the execution trace already contains all information, this feature is disabled by default to keep emails concise.
+   When enabled, emails will include:
+   - **Subagent Activities Summary**: A structured list of all subagent activities
+   - **Full Execution Trace**: The complete terminal output
+
+   Since the execution trace already contains all information, this feature is disabled by default to keep emails concise.
+
+2. **Execution Trace Display**
+
+   You can control whether to include the execution trace in email notifications:
+
+   ```json
+   // In your email channel configuration
+   {
+     "email": {
+       "config": {
+         "includeExecutionTrace": false  // Default: true
+       }
+     }
+   }
+   ```
+
+   - When `true` (default): Shows a scrollable execution trace section in emails
+   - When `false`: Removes the execution trace section entirely from emails
+
+   This is useful if you find the execution trace too verbose or if your email client has issues with scrollable content.
 
 ## 💡 Common Use Cases
 

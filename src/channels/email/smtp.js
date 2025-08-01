@@ -289,6 +289,36 @@ class EmailChannel extends NotificationChannel {
             enhancedSubject = enhancedSubject.replace('{{project}}', projectDir);
         }
         
+        // Check if execution trace should be included
+        const includeExecutionTrace = this.config.includeExecutionTrace !== false; // Default to true
+        
+        // Generate execution trace section HTML
+        let executionTraceSection = '';
+        let executionTraceText = '';
+        if (includeExecutionTrace) {
+            executionTraceSection = `
+                            <!-- Full Execution Trace (Terminal Style) -->
+                            <div style="margin-top: 40px; border-top: 1px solid #333; padding-top: 30px;">
+                                <div style="color: #666; margin-bottom: 15px;">
+                                    <span style="color: #666;">$</span> <span style="color: #666;">tail -n 1000 execution.log</span>
+                                </div>
+                                <div style="margin-left: 20px;">
+                                    <div style="color: #666; font-size: 12px; margin-bottom: 10px;">
+                                        <span style="color: #999;">[</span><span style="color: #666;">Execution Trace - Scroll to view</span><span style="color: #999;">]</span>
+                                    </div>
+                                    <div style="background-color: #0d0d0d; border: 1px solid #222; padding: 15px; max-height: 300px; overflow-y: auto; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #444 #0d0d0d;">
+                                        <pre style="margin: 0; color: #888; font-size: 11px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', 'Monaco', 'Courier New', monospace;">{{fullExecutionTrace}}</pre>
+                                    </div>
+                                </div>
+                            </div>`;
+            
+            executionTraceText = `
+
+====== FULL EXECUTION TRACE ======
+{{fullExecutionTrace}}
+==================================`;
+        }
+        
         // Template variable replacement
         const variables = {
             project: projectDir,
@@ -302,6 +332,8 @@ class EmailChannel extends NotificationChannel {
             projectDir: projectDir,
             shortQuestion: shortQuestion || 'No specific question',
             subagentActivities: notification.metadata?.subagentActivities || '',
+            executionTraceSection: executionTraceSection,
+            executionTraceText: executionTraceText,
             fullExecutionTrace: notification.metadata?.fullExecutionTrace || 
                 'No execution trace available. This may occur if the task completed very quickly or if tmux session logging is not enabled.'
         };
@@ -396,20 +428,7 @@ class EmailChannel extends NotificationChannel {
                                 </div>
                             </div>
                             
-                            <!-- Full Execution Trace (Terminal Style) -->
-                            <div style="margin-top: 40px; border-top: 1px solid #333; padding-top: 30px;">
-                                <div style="color: #666; margin-bottom: 15px;">
-                                    <span style="color: #666;">$</span> <span style="color: #666;">tail -n 1000 execution.log</span>
-                                </div>
-                                <details style="margin-left: 20px;">
-                                    <summary style="color: #666; font-size: 12px; cursor: pointer; user-select: none; margin-bottom: 10px;">
-                                        <span style="color: #999;">[</span><span style="color: #666;">Click to view full execution trace</span><span style="color: #999;">]</span>
-                                    </summary>
-                                    <div style="background-color: #0d0d0d; border: 1px solid #222; padding: 15px; max-height: 300px; overflow-y: auto; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #444 #0d0d0d;">
-                                        <pre style="margin: 0; color: #888; font-size: 11px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', 'Monaco', 'Courier New', monospace;">{{fullExecutionTrace}}</pre>
-                                    </div>
-                                </details>
-                            </div>
+                            {{executionTraceSection}}
                         </div>
                     </div>
                 </div>
@@ -427,11 +446,7 @@ Status: {{type}}
 🤖 Claude's Response:
 {{claudeResponse}}
 
-{{subagentActivities}}
-
-====== FULL EXECUTION TRACE ======
-{{fullExecutionTrace}}
-==================================
+{{subagentActivities}}{{executionTraceText}}
 
 How to Continue Conversation:
 To continue conversation with Claude Code, please reply to this email directly and enter your instructions in the email body.
