@@ -155,7 +155,7 @@ class ClaudeCodeRemoteCLI {
             }
         }
         
-        // For completed notifications, include subagent activities
+        // For completed notifications, include subagent activities and execution trace
         if (type === 'completed') {
             const SubagentTracker = require('./src/utils/subagent-tracker');
             const tracker = new SubagentTracker();
@@ -165,11 +165,10 @@ class ClaudeCodeRemoteCLI {
             const subagentSummary = tracker.formatActivitiesForEmail(trackingKey);
             if (subagentSummary) {
                 metadata.subagentActivities = subagentSummary;
-                this.logger.info('Including subagent activities in completion email');
-                
-                // Clear activities after including them
-                tracker.clearActivities(trackingKey);
             }
+            
+            // Clear activities after including them in the notification
+            tracker.clearActivities(trackingKey);
         }
         
         const result = await this.notifier.notify(type, metadata);
