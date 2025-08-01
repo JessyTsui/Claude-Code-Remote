@@ -48,7 +48,6 @@ build/
 # Temporary files
 tmp/
 temp/
-
 # Data files (session-specific, should not be committed)
 src/data/
 !src/data/.gitkeep

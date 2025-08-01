@@ -50,8 +50,24 @@ class Notifier {
             this.registerChannel('email', email);
         }
 
-        // TODO: Load other channels based on configuration
-        // Discord, Telegram, etc.
+        // Load LINE channel
+        const LINEChannel = require('../channels/line/line');
+        const lineConfig = this.config.getChannel('line');
+        if (lineConfig && lineConfig.enabled) {
+            const line = new LINEChannel(lineConfig.config || {});
+            this.registerChannel('line', line);
+        }
+
+        // Load Telegram channel
+        const TelegramChannel = require('../channels/telegram/telegram');
+        const telegramConfig = this.config.getChannel('telegram');
+        if (telegramConfig && telegramConfig.enabled) {
+            const telegram = new TelegramChannel(telegramConfig.config || {});
+            this.registerChannel('telegram', telegram);
+        }
+
+        // ✅ Telegram integration completed
+        // TODO: Future channels - Discord, Slack, Teams, etc.
 
         this.logger.info(`Initialized ${this.channels.size} channels`);
     }

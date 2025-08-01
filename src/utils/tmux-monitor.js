@@ -1,16 +1,76 @@
 /**
- * Tmux Session Monitor
- * Captures input/output from tmux sessions for email notifications
+ * Tmux Monitor - Enhanced for real-time monitoring with Telegram/LINE automation
+ * Monitors tmux session output for Claude completion patterns
+ * Based on the original email automation mechanism but adapted for real-time notifications
  */
 
 const { execSync } = require('child_process');
+const EventEmitter = require('events');
 const fs = require('fs');
 const path = require('path');
 const TraceCapture = require('./trace-capture');
 
-class TmuxMonitor {
-    constructor() {
+class TmuxMonitor extends EventEmitter {
+    constructor(sessionName = null) {
+        super();
+        this.sessionName = sessionName || process.env.TMUX_SESSION || 'claude-real';
         this.captureDir = path.join(__dirname, '../data/tmux-captures');
+        this.isMonitoring = false;
+        this.monitorInterval = null;
+        this.lastPaneContent = '';
+        this.outputBuffer = [];
+        this.maxBufferSize = 1000; // Keep last 1000 lines
+        this.checkInterval = 2000; // Check every 2 seconds
+        
+        // Claude completion patterns (adapted for Claude Code's actual output format)
+        this.completionPatterns = [
+            // Task completion indicators
+            /task.*completed/i,
+            /successfully.*completed/i,
+            /completed.*successfully/i,
+            /implementation.*complete/i,
+            /changes.*made/i,
+            /created.*successfully/i,
+            /updated.*successfully/i,
+            /file.*created/i,
+            /file.*updated/i,
+            /finished/i,
+            /done/i,
+            /✅/,
+            /All set/i,
+            /Ready/i,
+            
+            // Claude Code specific patterns
+            /The file.*has been updated/i,
+            /File created successfully/i,
+            /Command executed successfully/i,
+            /Operation completed/i,
+            
+            // Look for prompt return (indicating Claude finished responding)
+            /╰.*╯\s*$/,  // Box ending
+            /^\s*>\s*$/  // Empty prompt ready for input
+        ];
+        
+        // Waiting patterns (when Claude needs input)
+        this.waitingPatterns = [
+            /waiting.*for/i,
+            /need.*input/i,
+            /please.*provide/i,
+            /what.*would you like/i,
+            /how.*can I help/i,
+            /⏳/,
+            /What would you like me to/i,
+            /Is there anything else/i,
+            /Any other/i,
+            /Do you want/i,
+            /Would you like/i,
+            
+            // Claude Code specific waiting patterns
+            /\? for shortcuts/i,  // Claude Code waiting indicator
+            /╭.*─.*╮/,  // Start of response box
+            />\s*$/     // Empty prompt
+        ];
+        
         this._ensureCaptureDir();
         this.traceCapture = new TraceCapture();
     }
@@ -21,6 +81,290 @@ class TmuxMonitor {
         }
     }
 
+    // Real-time monitoring methods (new functionality)
+    start() {
+        if (this.isMonitoring) {
+            console.log('⚠️ TmuxMonitor already running');
+            return;
+        }
+
+        // Verify tmux session exists
+        if (!this._sessionExists()) {
+            console.error(`❌ Tmux session '${this.sessionName}' not found`);
+            throw new Error(`Tmux session '${this.sessionName}' not found`);
+        }
+
+        this.isMonitoring = true;
+        this._startRealTimeMonitoring();
+        console.log(`🔍 Started monitoring tmux session: ${this.sessionName}`);
+    }
+
+    stop() {
+        if (!this.isMonitoring) {
+            return;
+        }
+
+        this.isMonitoring = false;
+        if (this.monitorInterval) {
+            clearInterval(this.monitorInterval);
+            this.monitorInterval = null;
+        }
+        console.log('⏹️ TmuxMonitor stopped');
+    }
+
+    _sessionExists() {
+        try {
+            const sessions = execSync('tmux list-sessions -F "#{session_name}"', { 
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore']
+            }).trim().split('\n');
+            
+            return sessions.includes(this.sessionName);
+        } catch (error) {
+            return false;
+        }
+    }
+
+    _startRealTimeMonitoring() {
+        // Initial capture
+        this._captureCurrentContent();
+        
+        // Set up periodic monitoring
+        this.monitorInterval = setInterval(() => {
+            if (this.isMonitoring) {
+                this._checkForChanges();
+            }
+        }, this.checkInterval);
+    }
+
+    _captureCurrentContent() {
+        try {
+            // Capture current pane content
+            const content = execSync(`tmux capture-pane -t ${this.sessionName} -p`, {
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore']
+            });
+            
+            return content;
+        } catch (error) {
+            console.error('Error capturing tmux content:', error.message);
+            return '';
+        }
+    }
+
+    _checkForChanges() {
+        const currentContent = this._captureCurrentContent();
+        
+        if (currentContent !== this.lastPaneContent) {
+            // Get new content (lines that were added)
+            const newLines = this._getNewLines(this.lastPaneContent, currentContent);
+            
+            if (newLines.length > 0) {
+                // Add to buffer
+                this.outputBuffer.push(...newLines);
+                
+                // Trim buffer if too large
+                if (this.outputBuffer.length > this.maxBufferSize) {
+                    this.outputBuffer = this.outputBuffer.slice(-this.maxBufferSize);
+                }
+                
+                // Check for completion patterns
+                this._analyzeNewContent(newLines);
+            }
+            
+            this.lastPaneContent = currentContent;
+        }
+    }
+
+    _getNewLines(oldContent, newContent) {
+        const oldLines = oldContent.split('\n');
+        const newLines = newContent.split('\n');
+        
+        // Find lines that were added
+        const addedLines = [];
+        
+        // Simple approach: compare line by line from the end
+        const oldLength = oldLines.length;
+        const newLength = newLines.length;
+        
+        if (newLength > oldLength) {
+            // New lines were added
+            const numNewLines = newLength - oldLength;
+            addedLines.push(...newLines.slice(-numNewLines));
+        } else if (newLength === oldLength) {
+            // Same number of lines, check if last lines changed
+            for (let i = Math.max(0, newLength - 5); i < newLength; i++) {
+                if (i < oldLength && newLines[i] !== oldLines[i]) {
+                    addedLines.push(newLines[i]);
+                }
+            }
+        }
+        
+        return addedLines.filter(line => line.trim().length > 0);
+    }
+
+    _analyzeNewContent(newLines) {
+        const recentText = newLines.join('\n');
+        
+        // Also check the entire recent buffer for context
+        const bufferText = this.outputBuffer.slice(-20).join('\n');
+        
+        console.log('🔍 Analyzing new content:', newLines.slice(0, 2).map(line => line.substring(0, 50))); // Debug log
+        
+        // Look for Claude response completion patterns
+        const hasResponseEnd = this._detectResponseCompletion(recentText, bufferText);
+        const hasTaskCompletion = this._detectTaskCompletion(recentText, bufferText);
+        
+        if (hasTaskCompletion || hasResponseEnd) {
+            console.log('🎯 Task completion detected');
+            this._handleTaskCompletion(newLines);
+        }
+        // Don't constantly trigger waiting notifications for static content
+        else if (this._shouldTriggerWaitingNotification(recentText)) {
+            console.log('⏳ New waiting state detected');
+            this._handleWaitingForInput(newLines);
+        }
+    }
+    
+    _detectResponseCompletion(recentText, bufferText) {
+        // Look for Claude response completion indicators
+        const completionIndicators = [
+            /The file.*has been updated/i,
+            /File created successfully/i,
+            /successfully/i,
+            /completed/i,
+            /✅/,
+            /done/i
+        ];
+        
+        // Claude Code specific pattern: ⏺ response followed by box
+        const hasClaudeResponse = /⏺.*/.test(bufferText) || /⏺.*/.test(recentText);
+        const hasBoxStart = /╭.*╮/.test(recentText);
+        const hasBoxEnd = /╰.*╯/.test(recentText);
+        
+        // Look for the pattern: ⏺ response -> box -> empty prompt
+        const isCompleteResponse = hasClaudeResponse && (hasBoxStart || hasBoxEnd);
+        
+        return completionIndicators.some(pattern => pattern.test(recentText)) ||
+               isCompleteResponse;
+    }
+    
+    _detectTaskCompletion(recentText, bufferText) {
+        // Look for specific completion patterns
+        return this.completionPatterns.some(pattern => pattern.test(recentText));
+    }
+    
+    _shouldTriggerWaitingNotification(recentText) {
+        // Only trigger waiting notification for new meaningful content
+        // Avoid triggering on static "? for shortcuts" that doesn't change
+        const meaningfulWaitingPatterns = [
+            /waiting.*for/i,
+            /need.*input/i,
+            /please.*provide/i,
+            /what.*would you like/i,
+            /Do you want/i,
+            /Would you like/i
+        ];
+        
+        return meaningfulWaitingPatterns.some(pattern => pattern.test(recentText)) &&
+               !recentText.includes('? for shortcuts'); // Ignore static shortcuts line
+    }
+
+    _handleTaskCompletion(newLines) {
+        const conversation = this._extractRecentConversation();
+        
+        console.log('🎉 Claude task completion detected!');
+        
+        this.emit('taskCompleted', {
+            type: 'completed',
+            sessionName: this.sessionName,
+            timestamp: new Date().toISOString(),
+            newOutput: newLines,
+            conversation: conversation,
+            triggerText: newLines.join('\n')
+        });
+    }
+
+    _handleWaitingForInput(newLines) {
+        const conversation = this._extractRecentConversation();
+        
+        console.log('⏳ Claude waiting for input detected!');
+        
+        this.emit('waitingForInput', {
+            type: 'waiting',
+            sessionName: this.sessionName,
+            timestamp: new Date().toISOString(),
+            newOutput: newLines,
+            conversation: conversation,
+            triggerText: newLines.join('\n')
+        });
+    }
+
+    _extractRecentConversation() {
+        // Extract recent conversation from buffer
+        const recentBuffer = this.outputBuffer.slice(-50); // Last 50 lines
+        const text = recentBuffer.join('\n');
+        
+        // Try to identify user question and Claude response using Claude Code patterns
+        let userQuestion = '';
+        let claudeResponse = '';
+        
+        // Look for Claude Code specific patterns
+        const lines = recentBuffer;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            
+            // Look for user input (after > prompt)
+            if (line.startsWith('> ') && line.length > 2) {
+                userQuestion = line.substring(2).trim();
+                continue;
+            }
+            
+            // Look for Claude response (⏺ prefix)
+            if (line.startsWith('⏺ ') && line.length > 2) {
+                claudeResponse = line.substring(2).trim();
+                break;
+            }
+        }
+        
+        // If we didn't find the specific format, use fallback
+        if (!userQuestion || !claudeResponse) {
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // Skip system lines
+                if (!line || line.startsWith('[') || line.startsWith('$') || 
+                    line.startsWith('#') || line.includes('? for shortcuts') ||
+                    line.match(/^[╭╰│─]+$/)) {
+                    continue;
+                }
+                
+                if (!userQuestion && line.length > 2) {
+                    userQuestion = line;
+                } else if (userQuestion && !claudeResponse && line.length > 5 && line !== userQuestion) {
+                    claudeResponse = line;
+                    break;
+                }
+            }
+        }
+        
+        return {
+            userQuestion: userQuestion || 'Recent command',
+            claudeResponse: claudeResponse || 'Task completed',
+            fullContext: text
+        };
+    }
+
+    // Manual trigger methods for testing
+    triggerCompletionTest() {
+        this._handleTaskCompletion(['Test completion notification']);
+    }
+
+    triggerWaitingTest() {
+        this._handleWaitingForInput(['Test waiting notification']);
+    }
+
+    // Original capture methods (legacy support)
     /**
      * Start capturing a tmux session
      * @param {string} sessionName - The tmux session name
@@ -379,6 +723,22 @@ class TmuxMonitor {
         } catch (error) {
             console.error('Failed to cleanup captures:', error.message);
         }
+    }
+
+    // Enhanced status method
+    getStatus() {
+        return {
+            isMonitoring: this.isMonitoring,
+            sessionName: this.sessionName,
+            sessionExists: this._sessionExists(),
+            bufferSize: this.outputBuffer.length,
+            checkInterval: this.checkInterval,
+            patterns: {
+                completion: this.completionPatterns.length,
+                waiting: this.waitingPatterns.length
+            },
+            lastCheck: new Date().toISOString()
+        };
     }
 }
 
