@@ -196,5 +196,77 @@
     "sessionId": "e4604abc-34c3-4877-97bb-46446fadc210",
     "tmuxSession": "WavJaby",
     "description": "completed - Claude-Code-Remote"
+  },
+  "66UV8BSY": {
+    "type": "pty",
+    "createdAt": 1754042116,
+    "expiresAt": 1754128516,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "70f755a0-97ec-4f3f-a4f6-8ecb81e7b936",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "YJLU5SOZ": {
+    "type": "pty",
+    "createdAt": 1754042260,
+    "expiresAt": 1754128660,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "5c1742c6-6035-47ee-aa33-bdfed972fc59",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "IHNTYKRI": {
+    "type": "pty",
+    "createdAt": 1754042421,
+    "expiresAt": 1754128821,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "6a69131c-c34f-438a-9118-cb6766993957",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote-Test"
+  },
+  "JT2XV3IQ": {
+    "type": "pty",
+    "createdAt": 1754042430,
+    "expiresAt": 1754128830,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "c034515f-dacc-4e6b-a2d5-94a7eb244ff7",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "JWKZAUP3": {
+    "type": "pty",
+    "createdAt": 1754042622,
+    "expiresAt": 1754129022,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "577864fc-b3f3-4b11-ad2b-a80d3c5a9c73",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "M6CBCHWE": {
+    "type": "pty",
+    "createdAt": 1754043009,
+    "expiresAt": 1754129409,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "c131dcd1-7760-46c5-b22e-43a13abb713a",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "PXHJ7ICH": {
+    "type": "pty",
+    "createdAt": 1754043348,
+    "expiresAt": 1754129748,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "3aeb4fcc-0b71-48d7-ba72-5ff73279a296",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "TUQE3HIZ": {
+    "type": "pty",
+    "createdAt": 1754043480,
+    "expiresAt": 1754129880,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "fec19c5e-1c8a-4293-b2d2-86eb7b8f08d9",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote-Test"
   }
 }

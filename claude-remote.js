@@ -157,18 +157,31 @@ class ClaudeCodeRemoteCLI {
         
         // For completed notifications, include subagent activities and execution trace
         if (type === 'completed') {
-            const SubagentTracker = require('./src/utils/subagent-tracker');
-            const tracker = new SubagentTracker();
-            const trackingKey = metadata.tmuxSession || 'default';
+            const Config = require('./src/core/config');
+            const config = new Config();
+            config.load();
+            const showSubagentActivitiesInEmail = config.get('showSubagentActivitiesInEmail', false);
             
-            // Get and format subagent activities
-            const subagentSummary = tracker.formatActivitiesForEmail(trackingKey);
-            if (subagentSummary) {
-                metadata.subagentActivities = subagentSummary;
+            if (showSubagentActivitiesInEmail) {
+                const SubagentTracker = require('./src/utils/subagent-tracker');
+                const tracker = new SubagentTracker();
+                const trackingKey = metadata.tmuxSession || 'default';
+                
+                // Get and format subagent activities
+                const subagentSummary = tracker.formatActivitiesForEmail(trackingKey);
+                if (subagentSummary) {
+                    metadata.subagentActivities = subagentSummary;
+                }
+                
+                // Clear activities after including them in the notification
+                tracker.clearActivities(trackingKey);
+            } else {
+                // Always clear activities even if not showing them
+                const SubagentTracker = require('./src/utils/subagent-tracker');
+                const tracker = new SubagentTracker();
+                const trackingKey = metadata.tmuxSession || 'default';
+                tracker.clearActivities(trackingKey);
             }
-            
-            // Clear activities after including them in the notification
-            tracker.clearActivities(trackingKey);
         }
         
         const result = await this.notifier.notify(type, metadata);
