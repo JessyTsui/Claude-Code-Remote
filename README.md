@@ -188,7 +188,26 @@ export CLAUDE_HOOKS_CONFIG=/your/path/to/Claude-Code-Remote/claude-hooks.json
 
 > **Note**: Subagent notifications are disabled by default. To enable them, set `enableSubagentNotifications: true` in your config. See [Subagent Notifications Guide](./docs/SUBAGENT_NOTIFICATIONS.md) for details.
 
-### 5. Start Services
+### 5. Start tmux Session with Claude Code
+
+**IMPORTANT**: Claude Code Remote requires Claude to run in a tmux session for command injection to work.
+
+```bash
+# Start a new tmux session
+tmux new-session -d -s claude-session
+
+# Attach to the session
+tmux attach-session -t claude-session
+
+# Inside tmux, start Claude Code with hooks enabled
+claude-code --config /path/to/your/claude/settings.json
+
+# Detach from tmux (Ctrl+B, then D) to leave Claude running in background
+```
+
+> **Note**: Make sure your `~/.claude/settings.json` or project-specific config includes the hooks configuration from Step 4.
+
+### 6. Start Services
 
 #### For All Platforms (Recommended)
 ```bash
@@ -221,7 +240,7 @@ npm run line
 node start-line-webhook.js
 ```
 
-### 6. Test Your Setup
+### 7. Test Your Setup
 
 **Quick Test:**
 ```bash
