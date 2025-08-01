@@ -28,9 +28,9 @@ Control [Claude Code](https://claude.ai/code) remotely via email. Start tasks lo
 ## 📅 Changelog
 
 ### January 2025
-- **2025-01-15**: Implement terminal-style UI for email notifications ([#8](https://github.com/JessyTsui/Claude-Code-Remote/pull/8) by [@vaclisinc](https://github.com/vaclisinc))
-- **2025-01-15**: Fix working directory issue - enable claude-remote to run from any directory ([#7](https://github.com/JessyTsui/Claude-Code-Remote/pull/7) by [@vaclisinc](https://github.com/vaclisinc))
-- **2025-01-14**: Fix self-reply loop issue when using same email for send/receive ([#4](https://github.com/JessyTsui/Claude-Code-Remote/pull/4) by [@vaclisinc](https://github.com/vaclisinc))
+- **2025-08-01**: Implement terminal-style UI for email notifications ([#8](https://github.com/JessyTsui/Claude-Code-Remote/pull/8) by [@vaclisinc](https://github.com/vaclisinc))
+- **2025-08-01**: Fix working directory issue - enable claude-remote to run from any directory ([#7](https://github.com/JessyTsui/Claude-Code-Remote/pull/7) by [@vaclisinc](https://github.com/vaclisinc))
+- **2025-07-31**: Fix self-reply loop issue when using same email for send/receive ([#4](https://github.com/JessyTsui/Claude-Code-Remote/pull/4) by [@vaclisinc](https://github.com/vaclisinc))
 
 ### July 2025
 - **2025-07-28**: Remove hardcoded values and implement environment-based configuration ([#2](https://github.com/JessyTsui/Claude-Code-Remote/pull/2) by [@kevinsslin](https://github.com/kevinsslin))
@@ -99,6 +99,7 @@ SESSION_MAP_PATH=/your/absolute/path/to/Claude-Code-Remote/src/data/session-map.
 ```
 
 📌 **Gmail users**: Create an [App Password](https://myaccount.google.com/security) instead of using your regular password.
+> Note: You may need to enable two-step verification in your google account first before create app password.
 
 ### Step 3: Set Up Claude Code Hooks
 
