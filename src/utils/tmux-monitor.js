@@ -163,31 +163,61 @@ class TmuxMonitor {
     
     /**
      * Clean execution trace by removing command prompt and status line
+     * Also removes the first line (user input) and final output
      * @param {string} trace - Raw execution trace
      * @returns {string} - Cleaned trace
      */
     _cleanExecutionTrace(trace) {
         const lines = trace.split('\n');
         const cleanedLines = [];
-        let skipRemaining = false;
+        let skipFirstUserInput = true;
+        let lastClaudeResponseIndex = -1;
         
-        for (const line of lines) {
+        // Find the last Claude response (starts with "⏺ ")
+        for (let i = lines.length - 1; i >= 0; i--) {
+            if (lines[i].startsWith('⏺ ')) {
+                lastClaudeResponseIndex = i;
+                break;
+            }
+        }
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            
+            // Skip the first user input line
+            if (skipFirstUserInput && line.startsWith('> ')) {
+                skipFirstUserInput = false;
+                continue;
+            }
+            
             // Check if we've hit the command prompt box
             if (line.includes('╭─') && line.includes('─╮')) {
-                skipRemaining = true;
                 break;
             }
             
             // Skip empty command prompt lines
             if (line.match(/^│\s*>\s*│$/)) {
-                skipRemaining = true;
+                break;
+            }
+            
+            // Skip the last Claude response (already shown above)
+            if (i === lastClaudeResponseIndex) {
+                // Also skip any continuation lines after the last response
                 break;
             }
             
             cleanedLines.push(line);
         }
         
-        return cleanedLines.join('\n').trim();
+        // Remove empty lines at the beginning and end
+        while (cleanedLines.length > 0 && cleanedLines[0].trim() === '') {
+            cleanedLines.shift();
+        }
+        while (cleanedLines.length > 0 && cleanedLines[cleanedLines.length - 1].trim() === '') {
+            cleanedLines.pop();
+        }
+        
+        return cleanedLines.join('\n');
     }
 
     /**
