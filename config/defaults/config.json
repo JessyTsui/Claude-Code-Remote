@@ -5,6 +5,7 @@
     "waiting": "Hero"
   },
   "enabled": true,
+  "enableSubagentNotifications": false,
   "timeout": 5,
   "customMessages": {
     "completed": null,

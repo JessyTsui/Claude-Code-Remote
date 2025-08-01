@@ -610,5 +610,32 @@
     "sessionId": "2b30b1f7-b9c3-4cb4-b889-11c58009bd07",
     "tmuxSession": "test-session",
     "description": "completed - Claude-Code-Remote-Test"
+  },
+  "SRDSTC42": {
+    "type": "pty",
+    "createdAt": 1754023022,
+    "expiresAt": 1754109422,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "3d832d32-b644-406e-a1fb-f0a1a457afcc",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "ZJPYK2TT": {
+    "type": "pty",
+    "createdAt": 1754023268,
+    "expiresAt": 1754109668,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "728d74d1-23d2-4005-a85f-d426fb1bae2e",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "2EIREGZP": {
+    "type": "pty",
+    "createdAt": 1754023291,
+    "expiresAt": 1754109691,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "5b338dfb-b30f-49ba-970b-7c690be56418",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
   }
 }

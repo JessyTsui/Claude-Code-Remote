@@ -113,6 +113,19 @@ class ClaudeCodeRemoteCLI {
             process.exit(1);
         }
 
+        // Check if this is a subagent notification and if they're disabled
+        if (type === 'waiting') {
+            const Config = require('./src/core/config');
+            const config = new Config();
+            config.load();
+            const enableSubagentNotifications = config.get('enableSubagentNotifications', false);
+            
+            if (!enableSubagentNotifications) {
+                this.logger.info('Subagent notifications are disabled, skipping notification');
+                process.exit(0);
+            }
+        }
+
         // Automatically capture current tmux session conversation content
         const metadata = await this.captureCurrentConversation();
         

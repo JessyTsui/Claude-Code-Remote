@@ -84,6 +84,8 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
+> **Note**: Subagent notifications are disabled by default. To enable them, set `enableSubagentNotifications: true` in your config. See [Subagent Notifications Guide](./docs/SUBAGENT_NOTIFICATIONS.md) for details.
+
 ### 4. Start
 
 ```bash
