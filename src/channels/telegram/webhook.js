@@ -19,6 +19,7 @@ class TelegramWebhookHandler {
         this.injector = new ControllerInjector();
         this.app = express();
         this.apiBaseUrl = 'https://api.telegram.org';
+        this.botUsername = null; // Cache for bot username
         
         this._setupMiddleware();
         this._setupRoutes();
@@ -151,10 +152,24 @@ class TelegramWebhookHandler {
         // Answer callback query to remove loading state
         await this._answerCallbackQuery(callbackQuery.id);
         
-        if (data.startsWith('session:')) {
+        if (data.startsWith('personal:')) {
             const token = data.split(':')[1];
+            // Send personal chat command format
             await this._sendMessage(chatId,
-                `📝 *How to send a command:*\n\nType:\n\`/cmd ${token} <your command>\`\n\nExample:\n\`/cmd ${token} please analyze this code\``,
+                `📝 *Personal Chat Command Format:*\n\n\`/cmd ${token} <your command>\`\n\n*Example:*\n\`/cmd ${token} please analyze this code\`\n\n💡 *Copy and paste the format above, then add your command!*`,
+                { parse_mode: 'Markdown' });
+        } else if (data.startsWith('group:')) {
+            const token = data.split(':')[1];
+            // Send group chat command format with @bot_name
+            const botUsername = await this._getBotUsername();
+            await this._sendMessage(chatId,
+                `👥 *Group Chat Command Format:*\n\n\`@${botUsername} /cmd ${token} <your command>\`\n\n*Example:*\n\`@${botUsername} /cmd ${token} please analyze this code\`\n\n💡 *Copy and paste the format above, then add your command!*`,
+                { parse_mode: 'Markdown' });
+        } else if (data.startsWith('session:')) {
+            const token = data.split(':')[1];
+            // For backward compatibility - send help message for old callback buttons
+            await this._sendMessage(chatId,
+                `📝 *How to send a command:*\n\nType:\n\`/cmd ${token} <your command>\`\n\nExample:\n\`/cmd ${token} please analyze this code\`\n\n💡 *Tip:* New notifications have a button that auto-fills the command for you!`,
                 { parse_mode: 'Markdown' });
         }
     }
@@ -202,6 +217,28 @@ class TelegramWebhookHandler {
         }
         
         return false;
+    }
+
+    async _getBotUsername() {
+        if (this.botUsername) {
+            return this.botUsername;
+        }
+
+        try {
+            const response = await axios.get(
+                `${this.apiBaseUrl}/bot${this.config.botToken}/getMe`
+            );
+            
+            if (response.data.ok && response.data.result.username) {
+                this.botUsername = response.data.result.username;
+                return this.botUsername;
+            }
+        } catch (error) {
+            this.logger.error('Failed to get bot username:', error.message);
+        }
+        
+        // Fallback to configured username or default
+        return this.config.botUsername || 'claude_remote_bot';
     }
 
     async _findSessionByToken(token) {

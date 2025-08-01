@@ -66,8 +66,8 @@ class Notifier {
             this.registerChannel('telegram', telegram);
         }
 
-        // TODO: Load other channels based on configuration
-        // Discord, etc.
+        // ✅ Telegram integration completed
+        // TODO: Future channels - Discord, Slack, Teams, etc.
 
         this.logger.info(`Initialized ${this.channels.size} channels`);
     }

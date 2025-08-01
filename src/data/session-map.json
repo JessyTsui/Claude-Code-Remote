@@ -214,5 +214,329 @@
     "sessionId": "f8f915ee-ab64-471c-b3d2-71cb84d2b5fe",
     "tmuxSession": "video",
     "description": "completed - Claude-Code-Remote"
+  },
+  "2R8GD6VD": {
+    "type": "pty",
+    "createdAt": 1754066705,
+    "expiresAt": 1754153105,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "00a65f0d-b8ef-4c7f-97d6-74ace997f133",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "01BCXOI0": {
+    "type": "pty",
+    "createdAt": 1754066792,
+    "expiresAt": 1754153192,
+    "cwd": "/Users/jessytsui/dev/doc_page",
+    "sessionId": "47501ac6-1ae1-4584-9339-e64ebe8f4218",
+    "tmuxSession": "claude-test",
+    "description": "completed - doc_page"
+  },
+  "SLHHY01G": {
+    "type": "pty",
+    "createdAt": 1754066895,
+    "expiresAt": 1754153295,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "2704564c-3c4f-4174-95fb-33e476acd44a",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "9CUAHQ60": {
+    "type": "pty",
+    "createdAt": 1754066975,
+    "expiresAt": 1754153375,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "ba41d320-6579-4beb-bb62-0ea3cdeacfcb",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "C8ZKMS70": {
+    "type": "pty",
+    "createdAt": 1754067144,
+    "expiresAt": 1754153544,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "3050f159-e58f-4a3a-b744-45ae38f2e887",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "E71FAJA3": {
+    "type": "pty",
+    "createdAt": 1754067280,
+    "expiresAt": 1754153680,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "784bb250-9f56-4511-836f-a38f76c486ce",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "ZQIZ0SDR": {
+    "type": "pty",
+    "createdAt": 1754067317,
+    "expiresAt": 1754153717,
+    "cwd": "/Users/jessytsui/dev/doc_page",
+    "sessionId": "7277653b-cae9-4be9-9124-bc68a71c7152",
+    "tmuxSession": "claude-test",
+    "description": "completed - doc_page"
+  },
+  "0IEID7K0": {
+    "type": "pty",
+    "createdAt": 1754067385,
+    "expiresAt": 1754153785,
+    "cwd": "/Users/jessytsui",
+    "sessionId": "73e4e49d-bd47-43f8-92dc-42e530675a0a",
+    "tmuxSession": "claude-test",
+    "description": "completed - jessytsui"
+  },
+  "2MFHRVRP": {
+    "type": "pty",
+    "createdAt": 1754067582,
+    "expiresAt": 1754153982,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "60ed38da-6940-425e-a9fe-491840a3e0e7",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "WQUR8ZWG": {
+    "type": "pty",
+    "createdAt": 1754067778,
+    "expiresAt": 1754154178,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "bea5317e-5851-4d4a-9175-b79f766bc8a0",
+    "tmuxSession": "claude-code-remote",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "VGMHY9GU": {
+    "type": "pty",
+    "createdAt": 1754067874,
+    "expiresAt": 1754154274,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "2c4a832b-17e2-4005-af2b-f1452315269e",
+    "tmuxSession": "claude-code",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "EMECQ2ZG": {
+    "type": "pty",
+    "createdAt": 1754067996,
+    "expiresAt": 1754154396,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "e61867fb-9199-4fd4-8396-f41eac9cd9af",
+    "tmuxSession": "claude-code",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "WZKOH82S": {
+    "type": "pty",
+    "createdAt": 1754068559,
+    "expiresAt": 1754154959,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "ef2a8e7d-c2e0-4329-9d30-998c23ad9149",
+    "tmuxSession": "claude-code",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "O3ST8AI6": {
+    "type": "pty",
+    "createdAt": 1754069309,
+    "expiresAt": 1754155709,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "0aec093e-f4e0-45f6-8f15-b734f56e254f",
+    "tmuxSession": "claude-code",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "DUMTN3RR": {
+    "type": "pty",
+    "createdAt": 1754069671,
+    "expiresAt": 1754156071,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "08333291-85f8-4672-9590-685e3049d028",
+    "tmuxSession": "claude-code-test",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "55MH1LWK": {
+    "type": "pty",
+    "createdAt": 1754070069,
+    "expiresAt": 1754156469,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "719bf1a7-c6b1-4d45-ad47-86c985625232",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "55E0J99I": {
+    "type": "pty",
+    "createdAt": 1754070135,
+    "expiresAt": 1754156535,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "303dc5be-af53-478f-b5cd-702987eb29b4",
+    "tmuxSession": "claude-code",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "GK0JP7C4": {
+    "type": "pty",
+    "createdAt": 1754070531,
+    "expiresAt": 1754156931,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "86e0c519-edf6-401b-9d44-1b980d9288f4",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "5NCJVV7P": {
+    "type": "pty",
+    "createdAt": 1754070572,
+    "expiresAt": 1754156972,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "cd0b513c-ccbc-41aa-a044-235c16083dda",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "DSV496RA": {
+    "type": "pty",
+    "createdAt": 1754070585,
+    "expiresAt": 1754156985,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "e87bb1ed-f195-407d-8024-ac8e216bc632",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "G4N2KB5Y": {
+    "type": "pty",
+    "createdAt": 1754070676,
+    "expiresAt": 1754157076,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "0c546cad-0000-4f5c-8bff-493e6dbddfe2",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "DIHER2N2": {
+    "type": "pty",
+    "createdAt": 1754070936,
+    "expiresAt": 1754157336,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "cd1cb22d-2f2f-4e4e-9ad4-e1a6c68965d0",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "PVTAZK0W": {
+    "type": "pty",
+    "createdAt": 1754070976,
+    "expiresAt": 1754157376,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "d5281021-12e4-4ca2-bc44-533649969568",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "6WRFBJOE": {
+    "type": "pty",
+    "createdAt": 1754071040,
+    "expiresAt": 1754157440,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "13dbb781-3000-4a73-9cf6-551abfcb2df8",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "15LBIE97": {
+    "type": "pty",
+    "createdAt": 1754071107,
+    "expiresAt": 1754157507,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "b1441fcc-33d5-402b-b094-c8dc4ce36302",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "WLPTYZ86": {
+    "type": "pty",
+    "createdAt": 1754071313,
+    "expiresAt": 1754157713,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "c5f99272-5603-44d3-8e97-8b19bc74d54e",
+    "tmuxSession": "a",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "QF58O43H": {
+    "type": "pty",
+    "createdAt": 1754071345,
+    "expiresAt": 1754157745,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "7d3bae82-97fb-42bb-bd77-af36246f47db",
+    "tmuxSession": "ab",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "U62IMVYP": {
+    "type": "pty",
+    "createdAt": 1754071829,
+    "expiresAt": 1754158229,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "32190311-904e-4f21-9bac-ebe458d87936",
+    "tmuxSession": "claude-test",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "L4WIBBPP": {
+    "type": "pty",
+    "createdAt": 1754074724,
+    "expiresAt": 1754161124,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "04bec660-6454-407c-9881-f2bc714312b0",
+    "tmuxSession": "123",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "UFORANBW": {
+    "type": "pty",
+    "createdAt": 1754074755,
+    "expiresAt": 1754161155,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "b75d4767-e045-4530-8740-70f6515d8b13",
+    "tmuxSession": "123",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "R0AG2CIS": {
+    "type": "pty",
+    "createdAt": 1754074784,
+    "expiresAt": 1754161184,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "74f9ef13-a494-44eb-83a1-6d9eacc488fa",
+    "tmuxSession": "123",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "YPBWUW83": {
+    "type": "pty",
+    "createdAt": 1754075528,
+    "expiresAt": 1754161928,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "c5d901bf-cb1c-4590-b197-c960c4153af2",
+    "tmuxSession": "claude-hook-test",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "8KYNDD1A": {
+    "type": "pty",
+    "createdAt": 1754075553,
+    "expiresAt": 1754161953,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "096b69d9-040a-4e42-a2a2-7391ba2b9e20",
+    "tmuxSession": "claude-hook-test",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "EK7LG2H4": {
+    "type": "pty",
+    "createdAt": 1754075748,
+    "expiresAt": 1754162148,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "94c65db1-5d64-4c10-96c3-925bb69d6bf0",
+    "tmuxSession": "claude-hook-test",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "V75VD2QD": {
+    "type": "pty",
+    "createdAt": 1754075775,
+    "expiresAt": 1754162175,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "74443d59-66d9-4f37-b965-dbca9d79f111",
+    "tmuxSession": "claude-hook-test",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "FJW7PHHH": {
+    "type": "pty",
+    "createdAt": 1754076112,
+    "expiresAt": 1754162512,
+    "cwd": "/Users/jessytsui/dev/Claude-Code-Remote",
+    "sessionId": "10cd6e52-91a8-476a-af0a-1fe2c2929ab6",
+    "tmuxSession": "claude-hook-test",
+    "description": "completed - Claude-Code-Remote"
   }
 }
