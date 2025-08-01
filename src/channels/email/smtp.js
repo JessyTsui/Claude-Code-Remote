@@ -315,9 +315,9 @@ class EmailChannel extends NotificationChannel {
                         <!-- Terminal Header -->
                         <div style="background-color: #2d2d2d; padding: 10px 15px; border-bottom: 1px solid #444;">
                             <div style="display: inline-flex; align-items: center;">
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56; margin-right: 8px;"></span>
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e; margin-right: 8px;"></span>
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f; margin-right: 20px;"></span>
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56; margin-right: 6px;"></span>
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e; margin-right: 6px;"></span>
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f; margin-right: 12px;"></span>
                                 <span style="color: #999; font-size: 14px;">claude-code-remote@{{project}} - Task Completed</span>
                             </div>
                         </div>
@@ -416,9 +416,9 @@ Security Note: Please do not forward this email, session will automatically expi
                         <!-- Terminal Header -->
                         <div style="background-color: #2d2d2d; padding: 10px 15px; border-bottom: 1px solid #444;">
                             <div style="display: inline-flex; align-items: center;">
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56; margin-right: 8px;"></span>
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e; margin-right: 8px;"></span>
-                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f; margin-right: 20px;"></span>
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56; margin-right: 6px;"></span>
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e; margin-right: 6px;"></span>
+                                <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f; margin-right: 12px;"></span>
                                 <span style="color: #999; font-size: 14px;">claude-code-remote@{{project}} - Waiting for Input</span>
                             </div>
                         </div>
