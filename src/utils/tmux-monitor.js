@@ -61,7 +61,7 @@ class TmuxMonitor {
      * @param {number} lines - Number of lines to retrieve
      * @returns {Object} - { userQuestion, claudeResponse }
      */
-    getRecentConversation(sessionName, lines = 50) {
+    getRecentConversation(sessionName, lines = 200) {
         try {
             const captureFile = path.join(this.captureDir, `${sessionName}.log`);
             
@@ -87,7 +87,7 @@ class TmuxMonitor {
      * @param {string} sessionName - The tmux session name
      * @param {number} lines - Number of lines to retrieve
      */
-    getFromTmuxBuffer(sessionName, lines = 50) {
+    getFromTmuxBuffer(sessionName, lines = 200) {
         try {
             // Capture the pane contents
             const buffer = execSync(`tmux capture-pane -t ${sessionName} -p -S -${lines}`, {
@@ -150,17 +150,18 @@ class TmuxMonitor {
         // Join response lines and clean up
         claudeResponse = responseLines.join('\n').trim();
         
-        // Remove box characters and clean up formatting
+        // Remove box characters but preserve formatting
         claudeResponse = claudeResponse
             .replace(/[╭╰│]/g, '')
             .replace(/^\s*│\s*/gm, '')
-            .replace(/\s+/g, ' ')
+            // Don't collapse multiple spaces - preserve code formatting
+            // .replace(/\s+/g, ' ')
             .trim();
 
-        // Limit response length
-        if (claudeResponse.length > 500) {
-            claudeResponse = claudeResponse.substring(0, 497) + '...';
-        }
+        // Don't limit response length - we want the full response
+        // if (claudeResponse.length > 500) {
+        //     claudeResponse = claudeResponse.substring(0, 497) + '...';
+        // }
 
         // If we didn't find a question in the standard format, look for any recent text input
         if (!userQuestion) {

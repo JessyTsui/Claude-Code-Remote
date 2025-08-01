@@ -310,47 +310,75 @@ class EmailChannel extends NotificationChannel {
             completed: {
                 subject: '[Claude-Code-Remote #{{token}}] Claude Code Task Completed - {{project}}',
                 html: `
-                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
-                    <div style="background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                        <h2 style="color: #2c3e50; margin-top: 0; border-bottom: 2px solid #3498db; padding-bottom: 10px;">
-                            🎉 Claude Code Task Completed
-                        </h2>
-                        
-                        <div style="background-color: #ecf0f1; padding: 15px; border-radius: 6px; margin: 20px 0;">
-                            <p style="margin: 0; color: #2c3e50;">
-                                <strong>Project:</strong> {{projectDir}}<br>
-                                <strong>Time:</strong> {{timestamp}}<br>
-                                <strong>Status:</strong> {{type}}
-                            </p>
-                        </div>
-
-                        <div style="background-color: #fff3e0; padding: 15px; border-radius: 6px; border-left: 4px solid #ff9800; margin: 20px 0;">
-                            <h4 style="margin-top: 0; color: #e65100;">📝 Your Question</h4>
-                            <p style="margin: 0; color: #2c3e50; font-style: italic;">{{userQuestion}}</p>
-                        </div>
-
-                        <div style="background-color: #e8f5e8; padding: 15px; border-radius: 6px; border-left: 4px solid #27ae60;">
-                            <h4 style="margin-top: 0; color: #27ae60;">🤖 Claude's Response</h4>
-                            <p style="margin: 0; color: #2c3e50;">{{claudeResponse}}</p>
-                        </div>
-
-                        <div style="margin: 25px 0; padding: 20px; background-color: #fff3cd; border-radius: 6px; border-left: 4px solid #ffc107;">
-                            <h3 style="margin-top: 0; color: #856404;">💡 How to Continue the Conversation</h3>
-                            <p style="margin: 10px 0; color: #856404;">
-                                To continue conversation with Claude Code, please <strong>reply to this email</strong> directly and enter your instructions in the email body.
-                            </p>
-                            <div style="background-color: white; padding: 10px; border-radius: 4px; font-family: monospace; color: #495057;">
-                                Example replies:<br>
-                                • "Please continue optimizing the code"<br>
-                                • "Generate unit tests"<br>
-                                • "Explain the purpose of this function"
+                <div style="font-family: 'Consolas', 'Monaco', 'Courier New', monospace; background-color: #0c0c0c; color: #00ff00; padding: 0; margin: 0;">
+                    <div style="max-width: 900px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333; box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);">
+                        <!-- Terminal Header -->
+                        <div style="background-color: #2d2d2d; padding: 10px 15px; border-bottom: 1px solid #444; display: flex; align-items: center;">
+                            <div style="display: flex; gap: 8px; margin-right: 20px;">
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56;"></div>
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e;"></div>
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f;"></div>
                             </div>
+                            <div style="color: #999; font-size: 14px;">claude-code-remote@{{project}} - Task Completed</div>
                         </div>
-
-                        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d;">
-                            <p style="margin: 5px 0;">Session ID: <code>{{sessionId}}</code></p>
-                            <p style="margin: 5px 0;">🔒 Security note: Please do not forward this email, session will automatically expire after 24 hours</p>
-                            <p style="margin: 5px 0;">📧 This is an automated email from Claude-Code-Remote</p>
+                        
+                        <!-- Terminal Content -->
+                        <div style="padding: 20px; background-color: #0c0c0c; min-height: 400px;">
+                            <!-- Session Info -->
+                            <div style="color: #00ff00; margin-bottom: 20px;">
+                                <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code status</span><br>
+                                <div style="margin-left: 20px; margin-top: 5px; color: #ccc;">
+                                    <span style="color: #ff9800;">PROJECT:</span> {{projectDir}}<br>
+                                    <span style="color: #ff9800;">SESSION:</span> #{{token}}<br>
+                                    <span style="color: #ff9800;">STATUS:</span> <span style="color: #00ff00;">✓ Task Completed</span><br>
+                                    <span style="color: #ff9800;">TIME:</span> {{timestamp}}
+                                </div>
+                            </div>
+                            
+                            <!-- User Input -->
+                            <div style="margin: 20px 0;">
+                                <span style="color: #999;">$</span> <span style="color: #00ff00;">cat user_input.txt</span><br>
+                                <div style="background-color: #1a1a1a; border-left: 3px solid #ff9800; padding: 10px 15px; margin: 10px 0; color: #f0f0f0; white-space: pre-wrap; word-wrap: break-word;">{{userQuestion}}</div>
+                            </div>
+                            
+                            <!-- Claude Response -->
+                            <div style="margin: 20px 0;">
+                                <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code execute</span><br>
+                                <div style="color: #999; margin: 5px 0;">
+                                    <span style="color: #00bcd4;">[INFO]</span> Processing request...<br>
+                                    <span style="color: #00bcd4;">[INFO]</span> Executing task...
+                                </div>
+                                <div style="background-color: #1a1a1a; border-left: 3px solid #00ff00; padding: 15px; margin: 10px 0; color: #f0f0f0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; font-size: 14px; line-height: 1.6;">{{claudeResponse}}</div>
+                                <div style="color: #00ff00; margin-top: 10px;">
+                                    <span style="color: #00bcd4;">[SUCCESS]</span> Task completed successfully ✓
+                                </div>
+                            </div>
+                            
+                            <!-- Continue Instructions -->
+                            <div style="margin: 30px 0 20px 0; border-top: 1px solid #333; padding-top: 20px;">
+                                <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code help --continue</span><br>
+                                <div style="color: #f0f0f0; margin: 10px 0;">
+                                    <div style="color: #ff9800; margin-bottom: 10px;">→ TO CONTINUE THIS SESSION:</div>
+                                    <div style="background-color: #1a1a1a; padding: 15px; border: 1px solid #333; margin: 10px 0;">
+                                        Reply to this email directly with your next instruction.<br><br>
+                                        <span style="color: #999;">Examples:</span><br>
+                                        <span style="color: #00ff00;">  • "Add error handling to the function"</span><br>
+                                        <span style="color: #00ff00;">  • "Write unit tests for this code"</span><br>
+                                        <span style="color: #00ff00;">  • "Optimize the performance"</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Session Footer -->
+                            <div style="color: #666; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #333;">
+                                <span style="color: #999;">$</span> <span style="color: #666;">echo $SESSION_INFO</span><br>
+                                <div style="margin-left: 20px; margin-top: 5px;">
+                                    SESSION_ID={{sessionId}}<br>
+                                    EXPIRES_IN=24h<br>
+                                    SECURITY=Do not forward this email<br>
+                                    POWERED_BY=Claude-Code-Remote
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -383,36 +411,64 @@ Security Note: Please do not forward this email, session will automatically expi
             waiting: {
                 subject: '[Claude-Code-Remote #{{token}}] Claude Code Waiting for Input - {{project}}',
                 html: `
-                <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
-                    <div style="background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                        <h2 style="color: #2c3e50; margin-top: 0; border-bottom: 2px solid #e74c3c; padding-bottom: 10px;">
-                            ⏳ Claude Code Waiting for Your Guidance
-                        </h2>
+                <div style="font-family: 'Consolas', 'Monaco', 'Courier New', monospace; background-color: #0c0c0c; color: #00ff00; padding: 0; margin: 0;">
+                    <div style="max-width: 900px; margin: 0 auto; background-color: #1e1e1e; border: 1px solid #333; box-shadow: 0 0 20px rgba(0, 255, 0, 0.2);">
+                        <!-- Terminal Header -->
+                        <div style="background-color: #2d2d2d; padding: 10px 15px; border-bottom: 1px solid #444; display: flex; align-items: center;">
+                            <div style="display: flex; gap: 8px; margin-right: 20px;">
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ff5f56;"></div>
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #ffbd2e;"></div>
+                                <div style="width: 12px; height: 12px; border-radius: 50%; background-color: #27c93f;"></div>
+                            </div>
+                            <div style="color: #999; font-size: 14px;">claude-code-remote@{{project}} - Waiting for Input</div>
+                        </div>
                         
-                        <div style="background-color: #ecf0f1; padding: 15px; border-radius: 6px; margin: 20px 0;">
-                            <p style="margin: 0; color: #2c3e50;">
-                                <strong>Project:</strong> {{projectDir}}<br>
-                                <strong>Time:</strong> {{timestamp}}<br>
-                                <strong>Status:</strong> {{type}}
-                            </p>
-                        </div>
-
-                        <div style="background-color: #fdf2e9; padding: 15px; border-radius: 6px; border-left: 4px solid #e67e22;">
-                            <h4 style="margin-top: 0; color: #e67e22;">⏳ Waiting for Processing</h4>
-                            <p style="margin: 0; color: #2c3e50;">{{message}}</p>
-                        </div>
-
-                        <div style="margin: 25px 0; padding: 20px; background-color: #d1ecf1; border-radius: 6px; border-left: 4px solid #17a2b8;">
-                            <h3 style="margin-top: 0; color: #0c5460;">💬 Please Provide Guidance</h3>
-                            <p style="margin: 10px 0; color: #0c5460;">
-                                Claude needs your further guidance. Please <strong>reply to this email</strong> to tell Claude what to do next.
-                            </p>
-                        </div>
-
-                        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d;">
-                            <p style="margin: 5px 0;">Session ID: <code>{{sessionId}}</code></p>
-                            <p style="margin: 5px 0;">🔒 Security note: Please do not forward this email, session will automatically expire after 24 hours</p>
-                            <p style="margin: 5px 0;">📧 This is an automated email from Claude-Code-Remote</p>
+                        <!-- Terminal Content -->
+                        <div style="padding: 20px; background-color: #0c0c0c; min-height: 400px;">
+                            <!-- Session Info -->
+                            <div style="color: #00ff00; margin-bottom: 20px;">
+                                <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code status</span><br>
+                                <div style="margin-left: 20px; margin-top: 5px; color: #ccc;">
+                                    <span style="color: #ff9800;">PROJECT:</span> {{projectDir}}<br>
+                                    <span style="color: #ff9800;">SESSION:</span> #{{token}}<br>
+                                    <span style="color: #ff9800;">STATUS:</span> <span style="color: #ffeb3b;">⏳ Waiting for input</span><br>
+                                    <span style="color: #ff9800;">TIME:</span> {{timestamp}}
+                                </div>
+                            </div>
+                            
+                            <!-- Waiting Message -->
+                            <div style="margin: 20px 0;">
+                                <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code wait</span><br>
+                                <div style="color: #ffeb3b; margin: 10px 0;">
+                                    <span style="color: #ff9800;">[WAITING]</span> Claude needs your input to continue...<br>
+                                </div>
+                                <div style="background-color: #1a1a1a; border-left: 3px solid #ffeb3b; padding: 15px; margin: 10px 0; color: #f0f0f0;">
+                                    {{message}}
+                                </div>
+                            </div>
+                            
+                            <!-- Continue Instructions -->
+                            <div style="margin: 30px 0 20px 0; border-top: 1px solid #333; padding-top: 20px;">
+                                <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code help --respond</span><br>
+                                <div style="color: #f0f0f0; margin: 10px 0;">
+                                    <div style="color: #ff9800; margin-bottom: 10px;">→ ACTION REQUIRED:</div>
+                                    <div style="background-color: #1a1a1a; padding: 15px; border: 1px solid #333; margin: 10px 0;">
+                                        <span style="color: #ffeb3b;">Claude is waiting for your guidance.</span><br><br>
+                                        Reply to this email with your instructions to continue.
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Session Footer -->
+                            <div style="color: #666; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #333;">
+                                <span style="color: #999;">$</span> <span style="color: #666;">echo $SESSION_INFO</span><br>
+                                <div style="margin-left: 20px; margin-top: 5px;">
+                                    SESSION_ID={{sessionId}}<br>
+                                    EXPIRES_IN=24h<br>
+                                    SECURITY=Do not forward this email<br>
+                                    POWERED_BY=Claude-Code-Remote
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
