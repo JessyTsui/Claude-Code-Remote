@@ -347,8 +347,8 @@ class EmailChannel extends NotificationChannel {
             const placeholder = new RegExp(`{{${key}}}`, 'g');
             subject = subject.replace(placeholder, variables[key]);
             
-            // Special handling for subagentActivities - it's already HTML
-            if (key === 'subagentActivities') {
+            // Special handling for HTML content - don't escape
+            if (key === 'subagentActivities' || key === 'executionTraceSection') {
                 html = html.replace(placeholder, variables[key]);
             } else {
                 // Escape HTML entities for other content
