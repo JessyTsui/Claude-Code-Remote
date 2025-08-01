@@ -13,6 +13,18 @@ class SubagentTracker {
         this._ensureDataDir();
     }
 
+    _escapeHtml(text) {
+        if (!text) return '';
+        const htmlEntities = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+        return String(text).replace(/[&<>"']/g, char => htmlEntities[char]);
+    }
+
     _ensureDataDir() {
         if (!fs.existsSync(this.dataDir)) {
             fs.mkdirSync(this.dataDir, { recursive: true });
@@ -139,12 +151,12 @@ class SubagentTracker {
                 const time = new Date(item.timestamp).toLocaleTimeString();
                 html += `<li style="color: #ccc; margin: 8px 0; list-style-type: none;">`;
                 html += `<div style="background-color: #262626; padding: 10px; border-left: 3px solid #00bcd4; margin: 5px 0;">`;
-                html += `<div><span style="color: #999;">[${time}]</span> <strong style="color: #fff;">${item.description || 'Subagent task'}</strong></div>`;
+                html += `<div><span style="color: #999;">[${time}]</span> <strong style="color: #fff;">${this._escapeHtml(item.description || 'Subagent task')}</strong></div>`;
                 
                 if (item.details) {
                     // Show the question if available
                     if (item.details.userQuestion && item.details.userQuestion !== item.description) {
-                        html += `<div style="color: #00ff00; margin-top: 5px; font-size: 12px;">→ Question: ${item.details.userQuestion}</div>`;
+                        html += `<div style="color: #00ff00; margin-top: 5px; font-size: 12px;">→ Question: ${this._escapeHtml(item.details.userQuestion)}</div>`;
                     }
                     
                     // Show the response
@@ -155,7 +167,7 @@ class SubagentTracker {
                             html += `<div style="color: #ff9800; margin-top: 5px; font-size: 12px; font-style: italic;">⏳ Subagent was processing... (full output available in tmux session)</div>`;
                         } else {
                             html += `<div style="color: #ccc; margin-top: 5px; margin-left: 20px; font-size: 12px; white-space: pre-wrap; max-height: 200px; overflow-y: auto; background-color: #1a1a1a; padding: 8px; border-radius: 4px;">`;
-                            html += response.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            html += this._escapeHtml(response);
                             html += `</div>`;
                         }
                     }

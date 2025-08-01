@@ -24,6 +24,18 @@ class EmailChannel extends NotificationChannel {
         this._initializeTransporter();
     }
 
+    _escapeHtml(text) {
+        if (!text) return '';
+        const htmlEntities = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+        return text.replace(/[&<>"']/g, char => htmlEntities[char]);
+    }
+
     _ensureDirectories() {
         if (!fs.existsSync(this.sessionsDir)) {
             fs.mkdirSync(this.sessionsDir, { recursive: true });
@@ -298,7 +310,9 @@ class EmailChannel extends NotificationChannel {
         Object.keys(variables).forEach(key => {
             const placeholder = new RegExp(`{{${key}}}`, 'g');
             subject = subject.replace(placeholder, variables[key]);
-            html = html.replace(placeholder, variables[key]);
+            // Escape HTML entities for HTML content
+            html = html.replace(placeholder, this._escapeHtml(variables[key]));
+            // No escaping needed for plain text
             text = text.replace(placeholder, variables[key]);
         });
 
