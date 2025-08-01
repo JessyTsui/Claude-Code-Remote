@@ -345,98 +345,63 @@ class EmailChannel extends NotificationChannel {
                         
                         <!-- Terminal Content -->
                         <div style="padding: 20px; background-color: #1a1a1a; min-height: 400px;">
-                            <!-- Session Info -->
-                            <div style="color: #00ff00; margin-bottom: 20px;">
-                                <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code status</span><br>
-                                <div style="margin-left: 20px; margin-top: 5px; color: #ccc;">
-                                    <span style="color: #ff9800;">PROJECT:</span> {{projectDir}}<br>
-                                    <span style="color: #ff9800;">SESSION:</span> #{{token}}<br>
-                                    <span style="color: #ff9800;">STATUS:</span> <span style="color: #00ff00;">✓ Task Completed</span><br>
-                                    <span style="color: #ff9800;">TIME:</span> {{timestamp}}
+                            <!-- User Input (Terminal Style) -->
+                            <div style="margin-bottom: 30px;">
+                                <div style="color: #00ff00; margin-bottom: 10px;">
+                                    <span style="color: #999;">$</span> <span style="color: #00ff00;">cat user_request.txt</span>
                                 </div>
+                                <div style="background-color: #262626; border-left: 4px solid #ff9800; padding: 15px 20px; margin-left: 20px; color: #f0f0f0; font-size: 15px; line-height: 1.6; font-weight: 500;">{{userQuestion}}</div>
                             </div>
                             
-                            <!-- User Input -->
-                            <div style="margin: 20px 0;">
-                                <span style="color: #999;">$</span> <span style="color: #00ff00;">cat user_input.txt</span><br>
-                                <div style="background-color: #262626; border-left: 3px solid #ff9800; padding: 10px 15px; margin: 10px 0; color: #f0f0f0; white-space: pre-wrap; word-wrap: break-word;">{{userQuestion}}</div>
-                            </div>
-                            
-                            <!-- Claude Response -->
-                            <div style="margin: 20px 0;">
-                                <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code execute</span><br>
-                                <div style="color: #999; margin: 5px 0;">
-                                    <span style="color: #00bcd4;">[INFO]</span> Processing request...<br>
-                                    <span style="color: #00bcd4;">[INFO]</span> Executing task...
+                            <!-- Claude Response (Terminal Style) -->
+                            <div style="margin-bottom: 30px;">
+                                <div style="color: #00ff00; margin-bottom: 10px;">
+                                    <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code execute</span>
                                 </div>
-                                <div style="background-color: #262626; border-left: 3px solid #00ff00; padding: 15px; margin: 10px 0; color: #f0f0f0; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; font-size: 14px; line-height: 1.6;">{{claudeResponse}}</div>
-                                <div style="color: #00ff00; margin-top: 10px;">
-                                    <span style="color: #00bcd4;">[SUCCESS]</span> Task completed successfully ✓
+                                <div style="margin-left: 20px;">
+                                    <div style="color: #999; margin-bottom: 10px; font-size: 13px;">
+                                        <span style="color: #00bcd4;">[INFO]</span> Processing request...<br>
+                                        <span style="color: #00bcd4;">[INFO]</span> Task execution started at {{timestamp}}
+                                    </div>
+                                    <div style="background-color: #1f1f1f; border-left: 4px solid #00ff00; padding: 15px 20px; color: #f0f0f0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word;">{{claudeResponse}}</div>
+                                    <div style="color: #00ff00; margin-top: 10px; font-size: 13px;">
+                                        <span style="color: #00bcd4;">[SUCCESS]</span> Task completed successfully ✓
+                                    </div>
                                 </div>
                             </div>
                             
                             {{subagentActivities}}
                             
-                            <!-- Full Execution Trace -->
-                            <div style="margin: 20px 0; background-color: #1f1f1f; border: 1px solid #444; border-radius: 4px;">
-                                <div style="padding: 15px; color: #ff9800; font-weight: bold; border-bottom: 1px solid #444;">
-                                    📋 Full Execution Trace
+                            <!-- Continue Instructions (Terminal Style) -->
+                            <div style="margin: 40px 0; padding-top: 30px; border-top: 1px solid #333;">
+                                <div style="color: #ff9800; margin-bottom: 15px;">
+                                    <span style="color: #999;">$</span> <span style="color: #ff9800;">claude-code --help continue</span>
                                 </div>
-                                <div style="padding: 15px;">
-                                    <div style="color: #999; margin-bottom: 10px; font-size: 12px;">
-                                        Complete terminal output showing all interactions and reasoning:
-                                    </div>
-                                    <div style="background-color: #0d0d0d; padding: 15px; border: 1px solid #333; border-radius: 4px; max-height: 400px; overflow-y: scroll; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #666 #1a1a1a;">
-                                        <style>
-                                            /* Webkit browsers (Chrome, Safari) */
-                                            div::-webkit-scrollbar {
-                                                width: 12px;
-                                                height: 12px;
-                                            }
-                                            div::-webkit-scrollbar-track {
-                                                background: #1a1a1a;
-                                                border-radius: 6px;
-                                            }
-                                            div::-webkit-scrollbar-thumb {
-                                                background: #666;
-                                                border-radius: 6px;
-                                            }
-                                            div::-webkit-scrollbar-thumb:hover {
-                                                background: #888;
-                                            }
-                                        </style>
-                                        <pre style="margin: 0; color: #ccc; font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word;">{{fullExecutionTrace}}</pre>
-                                    </div>
-                                    <div style="color: #666; font-size: 11px; margin-top: 10px; text-align: center;">
-                                        Scroll to view more • Max height: 400px
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Continue Instructions -->
-                            <div style="margin: 30px 0 20px 0; border-top: 1px solid #333; padding-top: 20px;">
-                                <span style="color: #999;">$</span> <span style="color: #00ff00;">claude-code help --continue</span><br>
-                                <div style="color: #f0f0f0; margin: 10px 0;">
-                                    <div style="color: #ff9800; margin-bottom: 10px;">→ TO CONTINUE THIS SESSION:</div>
-                                    <div style="background-color: #262626; padding: 15px; border: 1px solid #333; margin: 10px 0;">
+                                <div style="margin-left: 20px; background-color: #0d0d0d; padding: 15px; border: 1px solid #333;">
+                                    <div style="color: #00ff00; margin-bottom: 10px; font-weight: bold;">TO CONTINUE THIS SESSION:</div>
+                                    <div style="color: #ccc; font-size: 13px; line-height: 1.8;">
                                         Reply to this email directly with your next instruction.<br><br>
-                                        <span style="color: #999;">Examples:</span><br>
-                                        <span style="color: #00ff00;">  • "Add error handling to the function"</span><br>
-                                        <span style="color: #00ff00;">  • "Write unit tests for this code"</span><br>
-                                        <span style="color: #00ff00;">  • "Optimize the performance"</span>
+                                        <span style="color: #666;">Examples:</span><br>
+                                        <span style="color: #999;">•</span> <span style="color: #00ff00;">"Add error handling to the function"</span><br>
+                                        <span style="color: #999;">•</span> <span style="color: #00ff00;">"Write unit tests for this code"</span><br>
+                                        <span style="color: #999;">•</span> <span style="color: #00ff00;">"Optimize the performance"</span>
                                     </div>
                                 </div>
                             </div>
                             
-                            <!-- Session Footer -->
-                            <div style="color: #666; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #333;">
-                                <span style="color: #999;">$</span> <span style="color: #666;">echo $SESSION_INFO</span><br>
-                                <div style="margin-left: 20px; margin-top: 5px;">
-                                    SESSION_ID={{sessionId}}<br>
-                                    EXPIRES_IN=24h<br>
-                                    SECURITY=Do not forward this email<br>
-                                    POWERED_BY=Claude-Code-Remote
+                            <!-- Full Execution Trace (Terminal Style) -->
+                            <div style="margin-top: 40px; border-top: 1px solid #333; padding-top: 30px;">
+                                <div style="color: #666; margin-bottom: 15px;">
+                                    <span style="color: #666;">$</span> <span style="color: #666;">tail -n 1000 execution.log</span>
                                 </div>
+                                <details style="margin-left: 20px;">
+                                    <summary style="color: #666; font-size: 12px; cursor: pointer; user-select: none; margin-bottom: 10px;">
+                                        <span style="color: #999;">[</span><span style="color: #666;">Click to view full execution trace</span><span style="color: #999;">]</span>
+                                    </summary>
+                                    <div style="background-color: #0d0d0d; border: 1px solid #222; padding: 15px; max-height: 300px; overflow-y: auto; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #444 #0d0d0d;">
+                                        <pre style="margin: 0; color: #888; font-size: 11px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', 'Monaco', 'Courier New', monospace;">{{fullExecutionTrace}}</pre>
+                                    </div>
+                                </details>
                             </div>
                         </div>
                     </div>

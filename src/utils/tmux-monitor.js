@@ -6,11 +6,13 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const TraceCapture = require('./trace-capture');
 
 class TmuxMonitor {
     constructor() {
         this.captureDir = path.join(__dirname, '../data/tmux-captures');
         this._ensureCaptureDir();
+        this.traceCapture = new TraceCapture();
     }
 
     _ensureCaptureDir() {
@@ -75,7 +77,7 @@ class TmuxMonitor {
             const allLines = content.split('\n');
             const recentLines = allLines.slice(-lines);
 
-            return this.extractConversation(recentLines.join('\n'));
+            return this.extractConversation(recentLines.join('\n'), sessionName);
         } catch (error) {
             console.error(`Failed to get conversation for session ${sessionName}:`, error.message);
             return { userQuestion: '', claudeResponse: '' };
@@ -95,7 +97,7 @@ class TmuxMonitor {
                 stdio: ['ignore', 'pipe', 'ignore']
             });
 
-            return this.extractConversation(buffer);
+            return this.extractConversation(buffer, sessionName);
         } catch (error) {
             console.error(`Failed to get tmux buffer for session ${sessionName}:`, error.message);
             return { userQuestion: '', claudeResponse: '' };
@@ -110,15 +112,21 @@ class TmuxMonitor {
      */
     getFullExecutionTrace(sessionName, lines = 1000) {
         try {
-            const captureFile = path.join(this.captureDir, `${sessionName}.log`);
+            // Get last user input timestamp
+            const lastInputTime = this.traceCapture.getLastUserInputTime(sessionName);
             
             let content;
-            if (!fs.existsSync(captureFile)) {
+            if (!fs.existsSync(path.join(this.captureDir, `${sessionName}.log`))) {
                 // If no capture file, try to get from tmux buffer
                 content = this.getFullTraceFromTmuxBuffer(sessionName, lines);
             } else {
                 // Read the capture file
-                content = fs.readFileSync(captureFile, 'utf8');
+                content = fs.readFileSync(path.join(this.captureDir, `${sessionName}.log`), 'utf8');
+            }
+            
+            // If we have a user input timestamp, filter content to only show after that time
+            if (lastInputTime) {
+                content = this._filterByTimestamp(content, lastInputTime);
             }
             
             // Clean up the trace by removing the command prompt box
@@ -127,6 +135,32 @@ class TmuxMonitor {
             console.error(`Failed to get full trace for session ${sessionName}:`, error.message);
             return '';
         }
+    }
+    
+    /**
+     * Filter content to only include lines after a certain timestamp
+     * @param {string} content - The full content
+     * @param {number} timestamp - Unix timestamp in milliseconds
+     * @returns {string} - Filtered content
+     */
+    _filterByTimestamp(content, timestamp) {
+        const lines = content.split('\n');
+        let capture = false;
+        let filteredLines = [];
+        
+        for (const line of lines) {
+            // Check if this line contains a user input marker
+            if (line.includes('> ') && !capture) {
+                // Simple heuristic: if we see user input, start capturing
+                capture = true;
+            }
+            
+            if (capture) {
+                filteredLines.push(line);
+            }
+        }
+        
+        return filteredLines.join('\n');
     }
     
     /**
@@ -181,9 +215,10 @@ class TmuxMonitor {
     /**
      * Extract user question and Claude response from captured text
      * @param {string} text - The captured text
+     * @param {string} sessionName - The tmux session name (optional)
      * @returns {Object} - { userQuestion, claudeResponse }
      */
-    extractConversation(text) {
+    extractConversation(text, sessionName = null) {
         const lines = text.split('\n');
         
         let userQuestion = '';
@@ -200,6 +235,12 @@ class TmuxMonitor {
                 userQuestion = line.substring(2).trim();
                 inResponse = false; // Reset response capture
                 responseLines = []; // Clear previous response
+                
+                // Record user input timestamp if session name provided
+                if (sessionName) {
+                    this.traceCapture.recordUserInput(sessionName);
+                }
+                
                 continue;
             }
             
