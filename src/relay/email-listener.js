@@ -19,6 +19,7 @@ class EmailListener extends EventEmitter {
         this.isConnected = false;
         this.isListening = false;
         this.sessionsDir = path.join(__dirname, '../data/sessions');
+        this.sentMessagesPath = config.sentMessagesPath || path.join(__dirname, '../data/sent-messages.json');
         this.checkInterval = (config.template?.checkInterval || 30) * 1000; // Convert to milliseconds
         this.lastCheckTime = new Date();
         
@@ -213,6 +214,14 @@ class EmailListener extends EventEmitter {
 
     async _handleParsedEmail(email, seqno) {
         try {
+            // First check if this is a system-sent email
+            const messageId = email.headers.get('message-id');
+            if (await this._isSystemSentEmail(messageId)) {
+                this.logger.debug(`Skipping system-sent email: ${messageId}`);
+                await this._removeFromSentMessages(messageId);
+                return;
+            }
+            
             // Check if it's a reply email
             if (!this._isReplyEmail(email)) {
                 this.logger.debug(`Email ${seqno} is not a TaskPing reply`);
@@ -270,9 +279,9 @@ class EmailListener extends EventEmitter {
     }
 
     _isReplyEmail(email) {
-        // Check if subject contains TaskPing identifier
+        // Check if subject contains Claude-Code-Remote identifier
         const subject = email.subject || '';
-        if (!subject.includes('[TaskPing]')) {
+        if (!subject.includes('[Claude-Code-Remote')) {
             return false;
         }
 
@@ -290,8 +299,17 @@ class EmailListener extends EventEmitter {
     _extractSessionId(email) {
         // Extract from email headers
         const headers = email.headers;
-        if (headers && headers.get('x-taskping-session-id')) {
-            return headers.get('x-taskping-session-id');
+        if (headers && headers.get('x-claude-code-remote-session-id')) {
+            return headers.get('x-claude-code-remote-session-id');
+        }
+
+        // Extract token from subject line
+        const subject = email.subject || '';
+        const tokenMatch = subject.match(/\[Claude-Code-Remote #([A-Z0-9]{6,8})\]/);
+        if (tokenMatch) {
+            const token = tokenMatch[1];
+            // Look up session by token
+            return this._getSessionIdByToken(token);
         }
 
         // Extract from email body (as backup method)
@@ -308,6 +326,25 @@ class EmailListener extends EventEmitter {
             return htmlSessionMatch[1];
         }
 
+        return null;
+    }
+
+    _getSessionIdByToken(token) {
+        // Check session files for matching token
+        try {
+            const sessionFiles = fs.readdirSync(this.sessionsDir);
+            for (const file of sessionFiles) {
+                if (file.endsWith('.json')) {
+                    const sessionPath = path.join(this.sessionsDir, file);
+                    const sessionData = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+                    if (sessionData.token === token) {
+                        return sessionData.id;
+                    }
+                }
+            }
+        } catch (error) {
+            this.logger.error('Error looking up session by token:', error.message);
+        }
         return null;
     }
 
@@ -429,6 +466,42 @@ class EmailListener extends EventEmitter {
             } catch (error) {
                 this.logger.error(`Error updating session ${sessionId}:`, error.message);
             }
+        }
+    }
+
+    async _isSystemSentEmail(messageId) {
+        if (!messageId || !fs.existsSync(this.sentMessagesPath)) {
+            return false;
+        }
+        
+        try {
+            const sentMessages = JSON.parse(fs.readFileSync(this.sentMessagesPath, 'utf8'));
+            return sentMessages.messages.some(msg => msg.messageId === messageId);
+        } catch (error) {
+            this.logger.error('Error reading sent messages:', error.message);
+            return false;
+        }
+    }
+
+    async _removeFromSentMessages(messageId) {
+        if (!fs.existsSync(this.sentMessagesPath)) {
+            return;
+        }
+        
+        try {
+            const sentMessages = JSON.parse(fs.readFileSync(this.sentMessagesPath, 'utf8'));
+            sentMessages.messages = sentMessages.messages.filter(msg => msg.messageId !== messageId);
+            
+            // Also clean up old messages (older than 24 hours)
+            const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            sentMessages.messages = sentMessages.messages.filter(msg => {
+                return new Date(msg.sentAt) > oneDayAgo;
+            });
+            
+            fs.writeFileSync(this.sentMessagesPath, JSON.stringify(sentMessages, null, 2));
+            this.logger.debug(`Removed message ${messageId} from sent tracking`);
+        } catch (error) {
+            this.logger.error('Error removing from sent messages:', error.message);
         }
     }
 }

@@ -3,8 +3,8 @@
 Control [Claude Code](https://claude.ai/code) remotely via multiple messaging platforms. Start tasks locally, receive notifications when Claude completes them, and send new commands by simply replying to messages.
 
 **Supported Platforms:**
-- 📧 **Email** - Traditional SMTP/IMAP integration
-- 📱 **Telegram** - Interactive bot with smart buttons ✅ **COMPLETED**  
+- 📧 **Email** - Traditional SMTP/IMAP integration with execution trace
+- 📱 **Telegram** - Interactive bot with smart buttons ✅ **NEW**
 - 💬 **LINE** - Rich messaging with token-based commands
 - 🖥️ **Desktop** - Sound alerts and system notifications
 
@@ -22,23 +22,39 @@ Control [Claude Code](https://claude.ai/code) remotely via multiple messaging pl
 
 > 🐦 Follow [@Jiaxi_Cui](https://x.com/Jiaxi_Cui) for updates and AI development insights
 
+## ✨ Features
+
+- **📧 Multiple Messaging Platforms**: 
+  - Email notifications with full execution trace and reply-to-send commands
+  - Telegram Bot with interactive buttons and slash commands ✅ **NEW**
+  - LINE messaging with token-based commands
+  - Desktop notifications with sound alerts
+- **🔄 Two-way Control**: Reply to messages or emails to send new commands
+- **📱 Remote Access**: Control Claude from anywhere
+- **🔒 Secure**: ID-based whitelist verification for all platforms
+- **👥 Group Support**: Use in LINE groups or Telegram groups for team collaboration
+- **🤖 Smart Commands**: Intuitive command formats for each platform
+- **📋 Multi-line Support**: Send complex commands with formatting
+- **⚡ Smart Monitoring**: Intelligent detection of Claude responses with historical tracking
+- **🔄 tmux Integration**: Seamless command injection into active tmux sessions
+- **📊 Execution Trace**: Full terminal output capture in email notifications
+
 ## 📅 Changelog
 
 ### August 2025
-**2025-08-01: Enhanced Multi-Channel Notification System** (by @laihenyi @JessyTsui)
-- ✅ **Telegram Integration Completed** - Interactive buttons, real-time commands, smart personal/group chat handling
-- ✅ **Multi-Channel Notifications** - Simultaneous delivery to Desktop, Telegram, Email, LINE
-- ✅ **Smart Sound Alerts** - Always-on audio feedback with customizable sounds
-- ✅ **Intelligent Session Management** - Auto-detection, real conversation content, 24-hour tokens
-
-**2025-08-01: Implement terminal-style UI for email notifications** (#8 by @vaclisinc)
-
-**2025-08-01: Fix working directory issue - enable claude-remote to run from any directory** (#7 by @vaclisinc)
+- **2025-08-02**: Add full execution trace to email notifications ([#14](https://github.com/JessyTsui/Claude-Code-Remote/pull/14))
+- **2025-08-01**: Enhanced Multi-Channel Notification System (by @laihenyi @JessyTsui)
+  - ✅ **Telegram Integration Completed** - Interactive buttons, real-time commands, smart personal/group chat handling
+  - ✅ **Multi-Channel Notifications** - Simultaneous delivery to Desktop, Telegram, Email, LINE
+  - ✅ **Smart Sound Alerts** - Always-on audio feedback with customizable sounds
+  - ✅ **Intelligent Session Management** - Auto-detection, real conversation content, 24-hour tokens
+- **2025-08-01**: Fix #9 #12: Add configuration to disable subagent notifications ([#10](https://github.com/JessyTsui/Claude-Code-Remote/pull/10))
+- **2025-08-01**: Implement terminal-style UI for email notifications ([#8](https://github.com/JessyTsui/Claude-Code-Remote/pull/8) by [@vaclisinc](https://github.com/vaclisinc))
+- **2025-08-01**: Fix working directory issue - enable claude-remote to run from any directory ([#7](https://github.com/JessyTsui/Claude-Code-Remote/pull/7) by [@vaclisinc](https://github.com/vaclisinc))
 
 ### July 2025
-**2025-07-31: Fix self-reply loop issue when using same email for send/receive** (#4 by @vaclisinc)
-
-**2025-07-28: Remove hardcoded values and implement environment-based configuration** (#2 by @kevinsslin)
+- **2025-07-31**: Fix self-reply loop issue when using same email for send/receive ([#4](https://github.com/JessyTsui/Claude-Code-Remote/pull/4) by [@vaclisinc](https://github.com/vaclisinc))
+- **2025-07-28**: Remove hardcoded values and implement environment-based configuration ([#2](https://github.com/JessyTsui/Claude-Code-Remote/pull/2) by [@kevinsslin](https://github.com/kevinsslin))
 
 ## 📋 TODO List
 
@@ -59,22 +75,6 @@ Control [Claude Code](https://claude.ai/code) remotely via multiple messaging pl
 ### Native Apps
 - **📱 Mobile Apps** - iOS and Android applications for remote Claude control
 - **🖥️ Desktop Apps** - macOS and Windows native clients with system integration
-
-## ✨ Features
-
-- **📧 Multiple Messaging Platforms**: 
-  - Email notifications with reply-to-send commands
-  - Telegram Bot with interactive buttons and slash commands ✅ **NEW**
-  - LINE messaging with token-based commands
-  - Desktop notifications with sound alerts ✅ **NEW**
-- **🔄 Two-way Control**: Reply to messages or emails to send new commands
-- **📱 Remote Access**: Control Claude from anywhere
-- **🔒 Secure**: ID-based whitelist verification for all platforms
-- **👥 Group Support**: Use in LINE groups or Telegram groups for team collaboration
-- **🤖 Smart Commands**: Intuitive command formats for each platform
-- **📋 Multi-line Support**: Send complex commands with formatting
-- **⚡ Smart Monitoring**: Intelligent detection of Claude responses with historical tracking
-- **🔄 tmux Integration**: Seamless command injection into active tmux sessions
 
 ## 🚀 Quick Start
 
@@ -186,7 +186,7 @@ Create hooks configuration file:
 export CLAUDE_HOOKS_CONFIG=/your/path/to/Claude-Code-Remote/claude-hooks.json
 ```
 
-**Note**: Replace `/your/path/to/Claude-Code-Remote` with your actual project path.
+> **Note**: Subagent notifications are disabled by default. To enable them, set `enableSubagentNotifications: true` in your config. See [Subagent Notifications Guide](./docs/SUBAGENT_NOTIFICATIONS.md) for details.
 
 ### 5. Start Services
 
@@ -241,7 +241,7 @@ node claude-hook-notify.js completed
 1. **Use Claude normally** in tmux session
 2. **Get notifications** when Claude completes tasks via:
    - 🔊 **Sound alert** (Desktop)
-   - 📧 **Email notification** (if enabled)
+   - 📧 **Email notification with execution trace** (if enabled)
    - 📱 **Telegram message with buttons** (if enabled)
    - 💬 **LINE message** (if enabled)
 3. **Reply with commands** using any platform
@@ -268,6 +268,47 @@ Reply to notification with: Your command here
 (Token automatically extracted from conversation context)
 ```
 
+### Advanced Configuration
+
+**Email Notification Options**
+
+1. **Subagent Activities in Email**
+
+   By default, email notifications only show the execution trace. You can optionally enable a separate subagent activities summary section:
+
+   ```json
+   // In your config/config.json
+   {
+     "showSubagentActivitiesInEmail": true  // Default: false
+   }
+   ```
+
+   When enabled, emails will include:
+   - **Subagent Activities Summary**: A structured list of all subagent activities
+   - **Full Execution Trace**: The complete terminal output
+
+   Since the execution trace already contains all information, this feature is disabled by default to keep emails concise.
+
+2. **Execution Trace Display**
+
+   You can control whether to include the execution trace in email notifications:
+
+   ```json
+   // In your email channel configuration
+   {
+     "email": {
+       "config": {
+         "includeExecutionTrace": false  // Default: true
+       }
+     }
+   }
+   ```
+
+   - When `true` (default): Shows a scrollable execution trace section in emails
+   - When `false`: Removes the execution trace section entirely from emails
+
+   This is useful if you find the execution trace too verbose or if your email client has issues with scrollable content.
+
 ## 💡 Use Cases
 
 - **Remote Code Reviews**: Start reviews at office, continue from home via any platform
@@ -291,6 +332,7 @@ node test-injection.js
 # System diagnostics
 node claude-remote.js diagnose
 node claude-remote.js status
+node claude-remote.js test
 ```
 
 ### Service Management
@@ -345,6 +387,12 @@ grep INJECTION_MODE .env  # Should be 'tmux'
 node test-injection.js
 ```
 
+**Not receiving emails?**
+- Run `node claude-remote.js test` to test email setup
+- Check spam folder
+- Verify SMTP settings in `.env`
+- For Gmail: ensure you're using App Password
+
 ### Debug Mode
 ```bash
 # Enable detailed logging
@@ -356,7 +404,7 @@ DEBUG=true node claude-hook-notify.js completed
 
 ### Multi-Platform Authentication
 - ✅ **Email**: Sender whitelist via `ALLOWED_SENDERS` environment variable
-- ✅ **Telegram**: Bot token and chat ID verification ✅ **NEW**
+- ✅ **Telegram**: Bot token and chat ID verification
 - ✅ **LINE**: Channel secret and access token validation
 - ✅ **Session Tokens**: 8-character alphanumeric tokens for command verification
 
@@ -381,6 +429,10 @@ MIT License - Feel free to use and modify!
 ---
 
 **🚀 Make Claude Code truly remote and accessible from anywhere!**
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=JessyTsui/Claude-Code-Remote&type=Date)](https://star-history.com/#JessyTsui/Claude-Code-Remote&Date)
 
 ⭐ **Star this repo** if it helps you code more efficiently!
 

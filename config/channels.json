@@ -6,32 +6,7 @@
   },
   "email": {
     "type": "email",
-    "enabled": true,
-    "config": {
-      "smtp": {
-        "host": "smtp.feishu.cn",
-        "port": 465,
-        "secure": true,
-        "auth": {
-          "user": "noreply@pandalla.ai",
-          "pass": "kKgS3tNReRTL3RQC"
-        }
-      },
-      "imap": {
-        "host": "imap.feishu.cn",
-        "port": 993,
-        "secure": true,
-        "auth": {
-          "user": "noreply@pandalla.ai",
-          "pass": "kKgS3tNReRTL3RQC"
-        }
-      },
-      "from": "Claude-Code-Remote Notification System <noreply@pandalla.ai>",
-      "to": "jiaxicui446@gmail.com",
-      "template": {
-        "checkInterval": 30
-      }
-    }
+    "enabled": true
   },
   "discord": {
     "type": "chat",

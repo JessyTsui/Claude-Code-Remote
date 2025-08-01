@@ -6,7 +6,7 @@
   },
   "enabled": true,
   "enableSubagentNotifications": false,
-  "showSubagentActivitiesInEmail": false,
+  "showSubagentActivitiesInEmail": true,
   "subagentActivityDetail": "medium",
   "timeout": 5,
   "customMessages": {

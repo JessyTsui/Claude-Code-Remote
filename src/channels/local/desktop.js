@@ -44,12 +44,12 @@ class DesktopChannel extends NotificationChannel {
             // Try terminal-notifier first
             try {
                 const cmd = `terminal-notifier -title "${title}" -message "${message}" -sound "${sound}" -group "claude-code-remote"`;
-                execSync(cmd, { timeout: 3000 });
+                execSync(cmd, { timeout: parseInt(process.env.NOTIFICATION_TIMEOUT) || 3000 });
                 return true;
             } catch (e) {
                 // Fallback to osascript
                 const script = `display notification "${message}" with title "${title}"`;
-                execSync(`osascript -e '${script}'`, { timeout: 3000 });
+                execSync(`osascript -e '${script}'`, { timeout: parseInt(process.env.NOTIFICATION_TIMEOUT) || 3000 });
                 
                 // Play sound separately
                 this._playSound(sound);
@@ -63,7 +63,9 @@ class DesktopChannel extends NotificationChannel {
 
     _sendLinux(title, message, sound) {
         try {
-            execSync(`notify-send "${title}" "${message}" -t 10000`, { timeout: 3000 });
+            const notificationTimeout = parseInt(process.env.NOTIFICATION_TIMEOUT) || 3000;
+            const displayTime = parseInt(process.env.NOTIFICATION_DISPLAY_TIME) || 10000;
+            execSync(`notify-send "${title}" "${message}" -t ${displayTime}`, { timeout: notificationTimeout });
             this._playSound(sound);
             return true;
         } catch (error) {

@@ -58,19 +58,31 @@ class ConfigManager {
             },
             email: {
                 type: 'email',
-                enabled: false,
+                enabled: process.env.SMTP_USER ? true : false,
                 config: {
                     smtp: {
-                        host: '',
-                        port: 587,
-                        secure: false,
+                        host: process.env.SMTP_HOST || 'smtp.gmail.com',
+                        port: parseInt(process.env.SMTP_PORT) || 587,
+                        secure: process.env.SMTP_SECURE === 'true',
                         auth: {
-                            user: '',
-                            pass: ''
+                            user: process.env.SMTP_USER || '',
+                            pass: process.env.SMTP_PASS || ''
                         }
                     },
-                    from: '',
-                    to: []
+                    imap: {
+                        host: process.env.IMAP_HOST || 'imap.gmail.com',
+                        port: parseInt(process.env.IMAP_PORT) || 993,
+                        secure: process.env.IMAP_SECURE !== 'false',
+                        auth: {
+                            user: process.env.IMAP_USER || process.env.SMTP_USER || '',
+                            pass: process.env.IMAP_PASS || process.env.SMTP_PASS || ''
+                        }
+                    },
+                    from: process.env.EMAIL_FROM || `${process.env.EMAIL_FROM_NAME || 'Claude Code Remote'} <${process.env.SMTP_USER}>`,
+                    to: process.env.EMAIL_TO || '',
+                    template: {
+                        checkInterval: parseInt(process.env.CHECK_INTERVAL) || 30
+                    }
                 }
             },
             discord: {
@@ -125,7 +137,7 @@ class ConfigManager {
         try {
             if (fs.existsSync(this.channelsConfigPath)) {
                 const fileChannels = JSON.parse(fs.readFileSync(this.channelsConfigPath, 'utf8'));
-                this._channels = { ...this._channels, ...fileChannels };
+                this._channels = this._deepMerge(this._channels, fileChannels);
             }
         } catch (error) {
             this.logger.warn('Failed to load channels config:', error.message);
