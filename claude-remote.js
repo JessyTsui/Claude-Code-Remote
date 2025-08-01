@@ -5,8 +5,10 @@
  * Main entry point for the CLI tool
  */
 
-// Load environment variables
-require('dotenv').config();
+// Load environment variables from Claude-Code-Remote directory
+const path = require('path');
+const envPath = path.join(__dirname, '.env');
+require('dotenv').config({ path: envPath });
 
 const Logger = require('./src/core/logger');
 const Notifier = require('./src/core/notifier');

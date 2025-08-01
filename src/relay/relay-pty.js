@@ -5,12 +5,13 @@
  * Uses node-imap instead of ImapFlow to resolve Feishu email compatibility issues
  */
 
-require('dotenv').config();
+const path = require('path');
+const envPath = path.join(__dirname, '../../.env');
+require('dotenv').config({ path: envPath });
 const Imap = require('node-imap');
 const { simpleParser } = require('mailparser');
 const { spawn } = require('node-pty');
 const { existsSync, readFileSync, writeFileSync } = require('fs');
-const path = require('path');
 const pino = require('pino');
 
 // Configure logging
