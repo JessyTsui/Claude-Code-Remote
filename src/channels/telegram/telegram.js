@@ -17,6 +17,7 @@ class TelegramChannel extends NotificationChannel {
         this.sessionsDir = path.join(__dirname, '../../data/sessions');
         this.tmuxMonitor = new TmuxMonitor();
         this.apiBaseUrl = 'https://api.telegram.org';
+        this.botUsername = null; // Cache for bot username
         
         this._ensureDirectories();
         this._validateConfig();
@@ -65,6 +66,28 @@ class TelegramChannel extends NotificationChannel {
         }
     }
 
+    async _getBotUsername() {
+        if (this.botUsername) {
+            return this.botUsername;
+        }
+
+        try {
+            const response = await axios.get(
+                `${this.apiBaseUrl}/bot${this.config.botToken}/getMe`
+            );
+            
+            if (response.data.ok && response.data.result.username) {
+                this.botUsername = response.data.result.username;
+                return this.botUsername;
+            }
+        } catch (error) {
+            this.logger.error('Failed to get bot username:', error.message);
+        }
+        
+        // Fallback to configured username or default
+        return this.config.botUsername || 'claude_remote_bot';
+    }
+
     async _sendImpl(notification) {
         if (!this._validateConfig()) {
             throw new Error('Telegram channel not properly configured');
@@ -93,18 +116,29 @@ class TelegramChannel extends NotificationChannel {
         
         // Determine recipient (chat or group)
         const chatId = this.config.groupId || this.config.chatId;
+        const isGroupChat = !!this.config.groupId;
+        
+        // Create buttons using callback_data instead of inline query
+        // This avoids the automatic @bot_name addition
+        const buttons = [
+            [
+                {
+                    text: '📝 Personal Chat',
+                    callback_data: `personal:${token}`
+                },
+                {
+                    text: '👥 Group Chat', 
+                    callback_data: `group:${token}`
+                }
+            ]
+        ];
         
         const requestData = {
             chat_id: chatId,
             text: messageText,
             parse_mode: 'Markdown',
             reply_markup: {
-                inline_keyboard: [[
-                    {
-                        text: '📝 Reply with Command',
-                        callback_data: `session:${token}`
-                    }
-                ]]
+                inline_keyboard: buttons
             }
         };
 

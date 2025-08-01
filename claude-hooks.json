@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/jessytsui/dev/Claude-Code-Remote/claude-hook-notify.js completed",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command", 
+            "command": "node /Users/jessytsui/dev/Claude-Code-Remote/claude-hook-notify.js waiting",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
