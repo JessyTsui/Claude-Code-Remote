@@ -163,20 +163,21 @@ class TmuxMonitor {
     
     /**
      * Clean execution trace by removing command prompt and status line
-     * Also removes the first line (user input) and final output
+     * Also removes the complete user input and final Claude response
      * @param {string} trace - Raw execution trace
      * @returns {string} - Cleaned trace
      */
     _cleanExecutionTrace(trace) {
         const lines = trace.split('\n');
         const cleanedLines = [];
-        let skipFirstUserInput = true;
-        let lastClaudeResponseIndex = -1;
+        let inUserInput = false;
+        let skipNextEmptyLine = false;
+        let lastClaudeResponseStart = -1;
         
-        // Find the last Claude response (starts with "⏺ ")
+        // Find where the last Claude response starts
         for (let i = lines.length - 1; i >= 0; i--) {
             if (lines[i].startsWith('⏺ ')) {
-                lastClaudeResponseIndex = i;
+                lastClaudeResponseStart = i;
                 break;
             }
         }
@@ -184,10 +185,30 @@ class TmuxMonitor {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             
-            // Skip the first user input line
-            if (skipFirstUserInput && line.startsWith('> ')) {
-                skipFirstUserInput = false;
+            // Check if we've reached the last Claude response
+            if (i >= lastClaudeResponseStart && lastClaudeResponseStart !== -1) {
+                break;
+            }
+            
+            // Start of user input
+            if (line.startsWith('> ')) {
+                inUserInput = true;
+                skipNextEmptyLine = true;
                 continue;
+            }
+            
+            // Still in user input (continuation lines)
+            if (inUserInput) {
+                // Check if we've reached the end of user input
+                if (line.trim() === '' || line.startsWith('⏺')) {
+                    inUserInput = false;
+                    if (skipNextEmptyLine && line.trim() === '') {
+                        skipNextEmptyLine = false;
+                        continue;
+                    }
+                } else {
+                    continue; // Skip user input continuation lines
+                }
             }
             
             // Check if we've hit the command prompt box
@@ -197,12 +218,6 @@ class TmuxMonitor {
             
             // Skip empty command prompt lines
             if (line.match(/^│\s*>\s*│$/)) {
-                break;
-            }
-            
-            // Skip the last Claude response (already shown above)
-            if (i === lastClaudeResponseIndex) {
-                // Also skip any continuation lines after the last response
                 break;
             }
             
