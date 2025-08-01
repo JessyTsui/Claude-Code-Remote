@@ -137,13 +137,30 @@ class SubagentTracker {
             html += `<ul style="margin: 5px 0 0 20px; padding: 0;">`;
             items.forEach((item, index) => {
                 const time = new Date(item.timestamp).toLocaleTimeString();
-                html += `<li style="color: #ccc; margin: 3px 0;">`;
-                html += `<span style="color: #999;">[${time}]</span> ${item.description}`;
-                if (item.details && item.details.claudeResponse) {
-                    html += `<div style="color: #888; margin-left: 20px; font-size: 12px; margin-top: 2px;">`;
-                    html += `${item.details.claudeResponse}`;
-                    html += `</div>`;
+                html += `<li style="color: #ccc; margin: 8px 0; list-style-type: none;">`;
+                html += `<div style="background-color: #262626; padding: 10px; border-left: 3px solid #00bcd4; margin: 5px 0;">`;
+                html += `<div><span style="color: #999;">[${time}]</span> <strong style="color: #fff;">${item.description || 'Subagent task'}</strong></div>`;
+                
+                if (item.details) {
+                    // Show the question if available
+                    if (item.details.userQuestion && item.details.userQuestion !== item.description) {
+                        html += `<div style="color: #00ff00; margin-top: 5px; font-size: 12px;">→ Question: ${item.details.userQuestion}</div>`;
+                    }
+                    
+                    // Show the response
+                    if (item.details.claudeResponse) {
+                        const response = item.details.claudeResponse;
+                        // Check if this is just initialization text
+                        if (response.includes('Initializing...') || response.includes('Concocting...')) {
+                            html += `<div style="color: #ff9800; margin-top: 5px; font-size: 12px; font-style: italic;">⏳ Subagent was processing... (full output available in tmux session)</div>`;
+                        } else {
+                            html += `<div style="color: #ccc; margin-top: 5px; margin-left: 20px; font-size: 12px; white-space: pre-wrap; max-height: 200px; overflow-y: auto; background-color: #1a1a1a; padding: 8px; border-radius: 4px;">`;
+                            html += response.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            html += `</div>`;
+                        }
+                    }
                 }
+                html += `</div>`;
                 html += `</li>`;
             });
             html += `</ul>`;

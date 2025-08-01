@@ -6,6 +6,7 @@
   },
   "enabled": true,
   "enableSubagentNotifications": false,
+  "subagentActivityDetail": "medium",
   "timeout": 5,
   "customMessages": {
     "completed": null,

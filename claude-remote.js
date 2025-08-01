@@ -131,15 +131,23 @@ class ClaudeCodeRemoteCLI {
                 // Use tmux session as the tracking key
                 const trackingKey = metadata.tmuxSession || 'default';
                 
+                // Capture more detailed information about the subagent activity
+                const activityDetails = {
+                    userQuestion: metadata.userQuestion || 'No question captured',
+                    claudeResponse: metadata.claudeResponse || 'No response captured',
+                    timestamp: new Date().toISOString(),
+                    tmuxSession: metadata.tmuxSession
+                };
+
+                // Don't truncate the response too aggressively
+                if (activityDetails.claudeResponse && activityDetails.claudeResponse.length > 1000) {
+                    activityDetails.claudeResponse = activityDetails.claudeResponse.substring(0, 1000) + '...[see full output in tmux]';
+                }
+
                 tracker.addActivity(trackingKey, {
                     type: 'SubagentStop',
                     description: metadata.userQuestion || 'Subagent task',
-                    details: {
-                        claudeResponse: metadata.claudeResponse ? 
-                            (metadata.claudeResponse.substring(0, 200) + '...') : 
-                            'No response captured',
-                        timestamp: new Date().toISOString()
-                    }
+                    details: activityDetails
                 });
                 
                 this.logger.info(`Subagent activity tracked for tmux session: ${trackingKey}`);

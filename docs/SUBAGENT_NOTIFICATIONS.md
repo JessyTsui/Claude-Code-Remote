@@ -47,7 +47,7 @@ If you want to receive notifications when subagents stop/start, change the setti
 }
 ```
 
-## How It Works
+## Technical Details
 
 1. When Claude Code triggers a `SubagentStop` hook, it calls:
    ```bash
@@ -55,7 +55,7 @@ If you want to receive notifications when subagents stop/start, change the setti
    ```
 
 2. The notification system checks the `enableSubagentNotifications` setting
-3. If disabled (default), the notification is skipped
+3. If disabled (default), the subagent activity is tracked for later inclusion in the completion email
 4. If enabled, the notification is sent as normal
 
 ## Command Examples
@@ -75,3 +75,7 @@ node claude-remote.js notify --type completed
 - When working with Claude Code, you're already aware of what's happening
 - The main task completion notification is usually sufficient
 - Reduces email/notification noise
+
+## Subagent Activity Details
+
+The completion email includes a summary of subagent activities. However, due to timing limitations, it may only show initialization messages rather than full results. See [Subagent Activity Details](./SUBAGENT_ACTIVITY_DETAILS.md) for more information about this limitation and available workarounds.

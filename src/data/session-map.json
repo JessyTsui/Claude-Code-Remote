@@ -655,5 +655,23 @@
     "sessionId": "f3aa13d5-ea7e-47db-ae83-c1a683f7cc06",
     "tmuxSession": "WavJaby",
     "description": "completed - Claude-Code-Remote"
+  },
+  "V7KOG8IR": {
+    "type": "pty",
+    "createdAt": 1754024378,
+    "expiresAt": 1754110778,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "9cf6fe8f-5d09-4293-a8ce-dface4f768e7",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "8SFKH618": {
+    "type": "pty",
+    "createdAt": 1754025289,
+    "expiresAt": 1754111689,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "23e6c3e7-f9f6-4c88-a207-d46a57d716f0",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
   }
 }
