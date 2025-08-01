@@ -185,8 +185,9 @@ class TmuxMonitor {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             
-            // Check if we've reached the last Claude response
-            if (i >= lastClaudeResponseStart && lastClaudeResponseStart !== -1) {
+            // Skip everything from the last Claude response onward
+            if (lastClaudeResponseStart !== -1 && i >= lastClaudeResponseStart) {
+                // But we want to show everything BEFORE the last response
                 break;
             }
             
@@ -270,12 +271,16 @@ class TmuxMonitor {
         let inResponse = false;
 
         // Find the most recent user question and Claude response
+        let inUserInput = false;
+        let userQuestionLines = [];
+        
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             
             // Detect user input (line starting with "> " followed by content)
             if (line.startsWith('> ') && line.length > 2) {
-                userQuestion = line.substring(2).trim();
+                userQuestionLines = [line.substring(2).trim()];
+                inUserInput = true;
                 inResponse = false; // Reset response capture
                 responseLines = []; // Clear previous response
                 
@@ -285,6 +290,18 @@ class TmuxMonitor {
                 }
                 
                 continue;
+            }
+            
+            // Continue capturing multi-line user input
+            if (inUserInput && !line.startsWith('⏺') && line.length > 0) {
+                userQuestionLines.push(line);
+                continue;
+            }
+            
+            // End of user input
+            if (inUserInput && (line.startsWith('⏺') || line.length === 0)) {
+                inUserInput = false;
+                userQuestion = userQuestionLines.join(' ');
             }
             
             // Detect Claude response (line starting with "⏺ " or other response indicators)

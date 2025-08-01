@@ -1,1 +1,200 @@
-{}
+{
+  "ARXF8MQA": {
+    "type": "pty",
+    "createdAt": 1754028630,
+    "expiresAt": 1754115030,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "43bacab1-b833-4fb7-892b-0b1612677c93",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "0K9FJ3L3": {
+    "type": "pty",
+    "createdAt": 1754028781,
+    "expiresAt": 1754115181,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "30e765d4-1d95-4626-96df-5cee293127c5",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "ZBWPFBE0": {
+    "type": "pty",
+    "createdAt": 1754029181,
+    "expiresAt": 1754115581,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "03984a75-97f3-4ffd-867c-0699cb577248",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "1D793YY8": {
+    "type": "pty",
+    "createdAt": 1754029282,
+    "expiresAt": 1754115682,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "783ece28-ce50-4e94-b5ed-076fbe2fc539",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "LZGG90UM": {
+    "type": "pty",
+    "createdAt": 1754029336,
+    "expiresAt": 1754115736,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "f0a80486-968f-4bf7-92a2-3d3a72cf8f7d",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "6HAYDL2E": {
+    "type": "pty",
+    "createdAt": 1754029770,
+    "expiresAt": 1754116170,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "eb5a0113-d07b-4e73-ade8-da6ec3711708",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote-Test"
+  },
+  "KF7T7M68": {
+    "type": "pty",
+    "createdAt": 1754029889,
+    "expiresAt": 1754116289,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "c50200c2-3d87-4a3d-a8de-56de2b82d3f3",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote-Test"
+  },
+  "OALNEHZZ": {
+    "type": "pty",
+    "createdAt": 1754029913,
+    "expiresAt": 1754116313,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "57354521-3862-4250-bef0-76189cc75490",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "06J5EHCE": {
+    "type": "pty",
+    "createdAt": 1754030002,
+    "expiresAt": 1754116402,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "952cf1fb-e09c-43d5-aadc-22a037400674",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote-Test"
+  },
+  "ZF3DBM8C": {
+    "type": "pty",
+    "createdAt": 1754030014,
+    "expiresAt": 1754116414,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "59ea6e0b-7534-481b-977f-20382f9999d8",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "DXKGM0BZ": {
+    "type": "pty",
+    "createdAt": 1754030193,
+    "expiresAt": 1754116593,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "9832d2eb-e8ad-4903-9aba-d5609b868fc5",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote-Test"
+  },
+  "TSQ3HGF4": {
+    "type": "pty",
+    "createdAt": 1754030205,
+    "expiresAt": 1754116605,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "dc18791c-c08a-4513-a57e-00a04648196a",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "KU80HCB5": {
+    "type": "pty",
+    "createdAt": 1754032660,
+    "expiresAt": 1754119060,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "830c6d98-f713-4220-a3c5-618e165ca397",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "LTLSJB2H": {
+    "type": "pty",
+    "createdAt": 1754033542,
+    "expiresAt": 1754119942,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "3295d333-7918-4c34-857c-328f8a2e06e3",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "JVL6R9EX": {
+    "type": "pty",
+    "createdAt": 1754033859,
+    "expiresAt": 1754120259,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "642b1f95-2c58-4ffd-97cc-3d9cf42b39eb",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote-Test"
+  },
+  "VQDWFJXQ": {
+    "type": "pty",
+    "createdAt": 1754033889,
+    "expiresAt": 1754120289,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "bae29575-4c59-40ed-baa8-c877e4e2aae7",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "R4SHXH4G": {
+    "type": "pty",
+    "createdAt": 1754038753,
+    "expiresAt": 1754125153,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "e82a0647-efd1-462f-9b9f-382fceb140a4",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote-Test"
+  },
+  "9U3ULUYR": {
+    "type": "pty",
+    "createdAt": 1754038768,
+    "expiresAt": 1754125168,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "1a98db71-32a4-4ffa-b47e-da67f747198d",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "1AP8TQBK": {
+    "type": "pty",
+    "createdAt": 1754038923,
+    "expiresAt": 1754125323,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "73e5fe95-8cff-450c-9ea5-937b422cfc01",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "RFY108R9": {
+    "type": "pty",
+    "createdAt": 1754040327,
+    "expiresAt": 1754126727,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "633e89b9-2ce0-41f5-999d-b37a03b4062f",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "7O7EEF7C": {
+    "type": "pty",
+    "createdAt": 1754040501,
+    "expiresAt": 1754126901,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "2efcf419-a217-422b-9db4-d1fb12c1ed02",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "6W0EBH5S": {
+    "type": "pty",
+    "createdAt": 1754040661,
+    "expiresAt": 1754127061,
+    "cwd": "/Users/vaclis./Documents/project/Claude-Code-Remote",
+    "sessionId": "e4604abc-34c3-4877-97bb-46446fadc210",
+    "tmuxSession": "WavJaby",
+    "description": "completed - Claude-Code-Remote"
+  }
+}

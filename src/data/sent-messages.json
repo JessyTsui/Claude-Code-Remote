@@ -1,3 +1,67 @@
 {
-  "messages": []
+  "messages": [
+    {
+      "messageId": "<43bacab1-b833-4fb7-892b-0b1612677c93-1754028630676@claude-code-remote>",
+      "sessionId": "43bacab1-b833-4fb7-892b-0b1612677c93",
+      "token": "ARXF8MQA",
+      "type": "notification",
+      "sentAt": "2025-08-01T06:10:33.440Z"
+    },
+    {
+      "messageId": "<03984a75-97f3-4ffd-867c-0699cb577248-1754029181656@claude-code-remote>",
+      "sessionId": "03984a75-97f3-4ffd-867c-0699cb577248",
+      "token": "ZBWPFBE0",
+      "type": "notification",
+      "sentAt": "2025-08-01T06:19:43.752Z"
+    },
+    {
+      "messageId": "<eb5a0113-d07b-4e73-ade8-da6ec3711708-1754029770421@claude-code-remote>",
+      "sessionId": "eb5a0113-d07b-4e73-ade8-da6ec3711708",
+      "token": "6HAYDL2E",
+      "type": "notification",
+      "sentAt": "2025-08-01T06:29:32.881Z"
+    },
+    {
+      "messageId": "<c50200c2-3d87-4a3d-a8de-56de2b82d3f3-1754029889659@claude-code-remote>",
+      "sessionId": "c50200c2-3d87-4a3d-a8de-56de2b82d3f3",
+      "token": "KF7T7M68",
+      "type": "notification",
+      "sentAt": "2025-08-01T06:31:32.288Z"
+    },
+    {
+      "messageId": "<57354521-3862-4250-bef0-76189cc75490-1754029913202@claude-code-remote>",
+      "sessionId": "57354521-3862-4250-bef0-76189cc75490",
+      "token": "OALNEHZZ",
+      "type": "notification",
+      "sentAt": "2025-08-01T06:31:55.881Z"
+    },
+    {
+      "messageId": "<3295d333-7918-4c34-857c-328f8a2e06e3-1754033542611@claude-code-remote>",
+      "sessionId": "3295d333-7918-4c34-857c-328f8a2e06e3",
+      "token": "LTLSJB2H",
+      "type": "notification",
+      "sentAt": "2025-08-01T07:32:26.027Z"
+    },
+    {
+      "messageId": "<73e5fe95-8cff-450c-9ea5-937b422cfc01-1754038923156@claude-code-remote>",
+      "sessionId": "73e5fe95-8cff-450c-9ea5-937b422cfc01",
+      "token": "1AP8TQBK",
+      "type": "notification",
+      "sentAt": "2025-08-01T09:02:06.296Z"
+    },
+    {
+      "messageId": "<633e89b9-2ce0-41f5-999d-b37a03b4062f-1754040327311@claude-code-remote>",
+      "sessionId": "633e89b9-2ce0-41f5-999d-b37a03b4062f",
+      "token": "RFY108R9",
+      "type": "notification",
+      "sentAt": "2025-08-01T09:25:29.418Z"
+    },
+    {
+      "messageId": "<2efcf419-a217-422b-9db4-d1fb12c1ed02-1754040501696@claude-code-remote>",
+      "sessionId": "2efcf419-a217-422b-9db4-d1fb12c1ed02",
+      "token": "7O7EEF7C",
+      "type": "notification",
+      "sentAt": "2025-08-01T09:28:24.342Z"
+    }
+  ]
 }
