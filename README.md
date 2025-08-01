@@ -7,7 +7,7 @@ Control [Claude Code](https://claude.ai/code) remotely via email. Start tasks lo
   ### 🎥 Watch Demo Video
   
   <a href="https://youtu.be/_yrNlDYOJhw">
-    <img src="./CCRemote_demo.png" alt="Claude Code Remote Demo" width="100%">
+    <img src="./assets/CCRemote_demo.png" alt="Claude Code Remote Demo" width="100%">
     <br>
     <img src="https://img.shields.io/badge/▶-Watch%20on%20YouTube-red?style=for-the-badge&logo=youtube" alt="Watch on YouTube">
   </a>
@@ -18,15 +18,48 @@ Control [Claude Code](https://claude.ai/code) remotely via email. Start tasks lo
 
 ## ✨ Features
 
-- **📧 Email Notifications**: Get notified when Claude completes tasks
+- **📧 Email Notifications**: Get notified when Claude completes tasks ![](./assets/email_demo.png)
 - **🔄 Email Control**: Reply to emails to send new commands to Claude
 - **📱 Remote Access**: Control Claude from anywhere with just email
 - **🔒 Secure**: Whitelist-based sender verification
 - **📋 Multi-line Support**: Send complex commands with formatting
 
-## 🚀 Quick Start
 
-### 1. Install
+## 📅 Changelog
+
+### January 2025
+- **2025-01-15**: Implement terminal-style UI for email notifications ([#8](https://github.com/JessyTsui/Claude-Code-Remote/pull/8) by [@vaclisinc](https://github.com/vaclisinc))
+- **2025-01-15**: Fix working directory issue - enable claude-remote to run from any directory ([#7](https://github.com/JessyTsui/Claude-Code-Remote/pull/7) by [@vaclisinc](https://github.com/vaclisinc))
+- **2025-01-14**: Fix self-reply loop issue when using same email for send/receive ([#4](https://github.com/JessyTsui/Claude-Code-Remote/pull/4) by [@vaclisinc](https://github.com/vaclisinc))
+
+### July 2025
+- **2025-07-28**: Remove hardcoded values and implement environment-based configuration ([#2](https://github.com/JessyTsui/Claude-Code-Remote/pull/2) by [@kevinsslin](https://github.com/kevinsslin))
+
+## 📋 TODO List
+
+### Notification Channels
+- [ ] **Discord & Telegram**: Bot integration for messaging platforms
+- [ ] **Slack Workflow**: Native Slack app with slash commands
+
+### Developer Tools
+- [ ] **AI Tools**: Support for Gemini CLI, Cursor, and other AI tools
+- [ ] **Git Automation**: Auto-commit, PR creation, branch management
+
+### Usage Analytics
+- [ ] **Cost Tracking**: Token usage and estimated costs
+- [ ] **Performance Metrics**: Execution time and resource usage
+- [ ] **Scheduled Reports**: Daily/weekly usage summaries via email
+
+### Native Apps
+- [ ] **Mobile Apps**: iOS and Android applications
+- [ ] **Desktop Apps**: macOS and Windows native clients
+
+
+## 🚀 Setup Guide
+
+Follow these steps to get Claude Code Remote running:
+
+### Step 1: Clone and Install Dependencies
 
 ```bash
 git clone https://github.com/JessyTsui/Claude-Code-Remote.git
@@ -34,32 +67,52 @@ cd Claude-Code-Remote
 npm install
 ```
 
-### 2. Configure Email
+### Step 2: Configure Email Settings
 
 ```bash
-# Copy example config
+# Copy the example configuration
 cp .env.example .env
 
-# Edit with your email credentials
-nano .env
+# Open .env in your editor
+nano .env  # or use vim, code, etc.
 ```
 
-**Required settings:**
+Edit the `.env` file with your email credentials:
+
 ```env
+# Email account for sending notifications
 SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
+SMTP_PASS=your-app-password    # Gmail: use App Password, not regular password
+
+# Email account for receiving replies (can be same as SMTP)
 IMAP_USER=your-email@gmail.com  
 IMAP_PASS=your-app-password
+
+# Where to send notifications
 EMAIL_TO=your-notification-email@gmail.com
+
+# Who can send commands (security whitelist)
 ALLOWED_SENDERS=your-notification-email@gmail.com
-SESSION_MAP_PATH=/your/path/to/Claude-Code-Remote/src/data/session-map.json
+
+# Path to session data (use absolute path)
+SESSION_MAP_PATH=/your/absolute/path/to/Claude-Code-Remote/src/data/session-map.json
 ```
 
-📌 **Gmail users**: Use [App Passwords](https://myaccount.google.com/security), not your regular password.
+📌 **Gmail users**: Create an [App Password](https://myaccount.google.com/security) instead of using your regular password.
 
-### 3. Configure Claude Code Hooks
+### Step 3: Set Up Claude Code Hooks
 
-Add to `~/.claude/settings.json`:
+Open Claude's settings file:
+
+```bash
+# Create the directory if it doesn't exist
+mkdir -p ~/.claude
+
+# Edit settings.json
+nano ~/.claude/settings.json
+```
+
+Add this configuration (replace `/your/absolute/path/` with your actual path):
 
 ```json
 {
@@ -68,7 +121,7 @@ Add to `~/.claude/settings.json`:
       "matcher": "*",
       "hooks": [{
         "type": "command",
-        "command": "node /your/path/to/Claude-Code-Remote/claude-remote.js notify --type completed",
+        "command": "node /your/absolute/path/to/Claude-Code-Remote/claude-remote.js notify --type completed",
         "timeout": 5
       }]
     }],
@@ -76,7 +129,7 @@ Add to `~/.claude/settings.json`:
       "matcher": "*",
       "hooks": [{
         "type": "command",
-        "command": "node /your/path/to/Claude-Code-Remote/claude-remote.js notify --type waiting",
+        "command": "node /your/absolute/path/to/Claude-Code-Remote/claude-remote.js notify --type waiting",
         "timeout": 5
       }]
     }]
@@ -86,86 +139,149 @@ Add to `~/.claude/settings.json`:
 
 > **Note**: Subagent notifications are disabled by default. To enable them, set `enableSubagentNotifications: true` in your config. See [Subagent Notifications Guide](./docs/SUBAGENT_NOTIFICATIONS.md) for details.
 
-### 4. Start
+### Step 4: Test Your Setup
 
 ```bash
-# Start email monitoring
-npm run relay:pty
+# Test email configuration
+node claude-remote.js test
+```
 
-# In another terminal, start Claude Code
-tmux new-session -d -s my-project
-tmux attach -t my-project
+You should receive a test email. If not, check your email settings.
+
+### Step 5: Start Claude Code Remote
+
+**Terminal 1 - Start email monitoring:**
+```bash
+npm run relay:pty
+```
+
+Keep this running. You should see:
+```
+🚀 Claude Code Remote is running!
+📧 Monitoring emails...
+```
+
+**Terminal 2 - Start Claude in tmux:**
+```bash
+# Create a new tmux session
+tmux new-session -s my-project
+
+# Inside tmux, start Claude
 claude
 ```
 
-## 🎮 How It Works
+### Step 6: You're Ready!
 
-1. **Use Claude normally** in tmux session
-2. **Get email notifications** when Claude completes tasks
-3. **Reply to emails** with new commands
-4. **Commands execute automatically** in Claude
+1. Use Claude normally in the tmux session
+2. When Claude completes a task, you'll receive an email
+3. Reply to the email with new commands
+4. Your commands will execute automatically in Claude
 
-📖 **Detailed Email Reply Guide**: [English](./HOW_TO_USE_EMAIL_REPLY.md) | [中文](./HOW_TO_USE_EMAIL_REPLY_ZH.md)
+### Verify Everything Works
 
-### Example Email Flow
+In Claude, type:
+```
+What is 2+2?
+```
 
-**📩 Notification received:**
+Wait for Claude to respond, then check your email. You should receive a notification!
+
+## 📖 How to Use
+
+### Email Notifications
+When Claude completes a task, you'll receive an email notification:
+
 ```
 Subject: Claude Code Remote Task Complete [#ABC123]
 
-Claude completed: "Analyze the code structure"
-[Claude's full response...]
+Claude completed: "analyze the code structure"
 
-Reply to send new commands.
+[Claude's full response here...]
+
+Reply to this email to send new commands.
 ```
 
-**📨 Your reply:**
+### Sending Commands via Email Reply
+
+1. **Direct Reply**: Simply reply to the notification email
+2. **Write Command**: Type your command in the email body:
+   ```
+   Please refactor the main function and add error handling
+   ```
+3. **Send**: Your command will automatically execute in Claude!
+
+### Advanced Email Features
+
+**Multi-line Commands**
 ```
-Please optimize the performance and fix any bugs you find.
+First analyze the current code structure.
+Then create a comprehensive test suite.
+Finally, update the documentation.
 ```
 
-**⚡ Result:** Your command automatically executes in Claude!
+**Complex Instructions**
+```
+Refactor the authentication module with these requirements:
+- Use JWT tokens instead of sessions
+- Add rate limiting
+- Implement refresh token logic
+- Update all related tests
+```
 
-## 💡 Use Cases
+### Email Reply Workflow
 
-- **Remote Code Reviews**: Start reviews at office, continue from home via email
-- **Long-running Tasks**: Monitor progress and guide next steps remotely
-- **Multi-location Development**: Control Claude from anywhere without VPN
+1. **Receive Notification** → You get an email when Claude completes a task
+2. **Reply with Command** → Send your next instruction via email reply
+3. **Automatic Execution** → The system extracts your command and injects it into Claude
+4. **Get Results** → Receive another email when the new task completes
 
-## 🔧 Commands
+### Supported Email Clients
+
+Works with any email client that supports standard reply functionality:
+- ✅ Gmail (Web/Mobile)
+- ✅ Apple Mail
+- ✅ Outlook
+- ✅ Any SMTP-compatible email client
+
+## 💡 Common Use Cases
+
+- **Remote Development**: Start coding at the office, continue from home via email
+- **Long Tasks**: Let Claude work while you're in meetings, check results via email
+- **Team Collaboration**: Share Claude sessions by forwarding notification emails
+
+## 🔧 Useful Commands
 
 ```bash
-# Test functionality
+# Test email setup
 node claude-remote.js test
 
-# Check status
+# Check system status
 node claude-remote.js status
 
-# View pending commands
-node claude-remote.js commands list
-
-# Manage sessions
+# View tmux sessions
 tmux list-sessions
-tmux attach -t session-name
+tmux attach -t my-project
+
+# Stop email monitoring
+# Press Ctrl+C in the terminal running npm run relay:pty
 ```
 
 ## 🔍 Troubleshooting
 
-**Email not working?**
-```bash
-node claude-remote.js test  # Test email setup
-```
+**Not receiving emails?**
+- Run `node claude-remote.js test` to test email setup
+- Check spam folder
+- Verify SMTP settings in `.env`
+- For Gmail: ensure you're using App Password
 
-**Commands not injecting?**
-```bash
-tmux list-sessions  # Check if session exists
-grep ALLOWED_SENDERS .env  # Verify sender whitelist
-```
+**Commands not executing?**
+- Ensure tmux session is running: `tmux list-sessions`
+- Check sender email matches `ALLOWED_SENDERS` in `.env`
+- Verify Claude is running inside tmux
 
-**Hooks not triggering?**
-```bash
-node claude-remote.js notify --type completed  # Test manually
-```
+**Need help?**
+- Check [Issues](https://github.com/JessyTsui/Claude-Code-Remote/issues)
+- Follow [@Jiaxi_Cui](https://x.com/Jiaxi_Cui) for updates
 
 ## 🛡️ Security
 
