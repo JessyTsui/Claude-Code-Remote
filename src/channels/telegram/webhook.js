@@ -305,6 +305,8 @@ class TelegramWebhookHandler {
                 {
                     url: webhookUrl,
                     allowed_updates: ['message', 'callback_query']
+                },{
+                    family: 4
                 }
             );
             

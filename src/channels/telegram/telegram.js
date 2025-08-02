@@ -145,7 +145,10 @@ class TelegramChannel extends NotificationChannel {
         try {
             const response = await axios.post(
                 `${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`,
-                requestData
+                requestData,
+                {
+                    family: 4
+                }
             );
 
             this.logger.info(`Telegram message sent successfully, Session: ${sessionId}`);
