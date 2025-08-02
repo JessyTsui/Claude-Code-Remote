@@ -24,7 +24,8 @@
       "botToken": "",
       "chatId": "",
       "groupId": "",
-      "whitelist": []
+      "whitelist": [],
+      "forceIPv4": false
     }
   },
   "whatsapp": {

@@ -96,10 +96,12 @@ class ConfigManager {
             },
             telegram: {
                 type: 'chat',
-                enabled: false,
+                enabled: process.env.TELEGRAM_ENABLED === 'true',
                 config: {
-                    token: '',
-                    chatId: ''
+                    botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+                    chatId: process.env.TELEGRAM_CHAT_ID || '',
+                    groupId: process.env.TELEGRAM_GROUP_ID || '',
+                    forceIPv4: process.env.TELEGRAM_FORCE_IPV4 === 'true'
                 }
             }
         };

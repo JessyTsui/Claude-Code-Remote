@@ -41,6 +41,18 @@ class TelegramChannel extends NotificationChannel {
         return true;
     }
 
+    /**
+     * Generate network options for axios requests
+     * @returns {Object} Network options object
+     */
+    _getNetworkOptions() {
+        const options = {};
+        if (this.config.forceIPv4) {
+            options.family = 4;
+        }
+        return options;
+    }
+
     _generateToken() {
         // Generate short Token (uppercase letters + numbers, 8 digits)
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -73,7 +85,8 @@ class TelegramChannel extends NotificationChannel {
 
         try {
             const response = await axios.get(
-                `${this.apiBaseUrl}/bot${this.config.botToken}/getMe`
+                `${this.apiBaseUrl}/bot${this.config.botToken}/getMe`,
+                this._getNetworkOptions()
             );
             
             if (response.data.ok && response.data.result.username) {
@@ -146,9 +159,7 @@ class TelegramChannel extends NotificationChannel {
             const response = await axios.post(
                 `${this.apiBaseUrl}/bot${this.config.botToken}/sendMessage`,
                 requestData,
-                {
-                    family: 4
-                }
+                this._getNetworkOptions()
             );
 
             this.logger.info(`Telegram message sent successfully, Session: ${sessionId}`);

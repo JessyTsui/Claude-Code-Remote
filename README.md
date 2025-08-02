@@ -141,6 +141,22 @@ TELEGRAM_WEBHOOK_URL=https://your-ngrok-url.app
 SESSION_MAP_PATH=/your/path/to/Claude-Code-Remote/src/data/session-map.json
 ```
 
+**Optional Telegram settings:**
+```env
+# Force IPv4 connections to Telegram API (default: false)
+# Enable this if you experience connectivity issues with IPv6
+TELEGRAM_FORCE_IPV4=true
+```
+
+**Network Configuration Notes:**
+- **IPv4 vs IPv6**: Some network environments may have unstable IPv6 connectivity to Telegram's API servers
+- **When to use `TELEGRAM_FORCE_IPV4=true`**:
+  - Connection timeouts or failures when sending messages
+  - Inconsistent webhook delivery
+  - Network environments that don't properly support IPv6
+- **Default behavior**: Uses system default (usually IPv6 when available, fallback to IPv4)
+- **Performance impact**: Minimal - only affects initial connection establishment
+
 #### Option C: Configure LINE
 
 **Required LINE settings:**
