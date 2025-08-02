@@ -277,6 +277,9 @@ class TelegramWebhookHandler {
                     chat_id: chatId,
                     text: text,
                     ...options
+                },
+                {
+                    family: 4
                 }
             );
         } catch (error) {
@@ -291,6 +294,9 @@ class TelegramWebhookHandler {
                 {
                     callback_query_id: callbackQueryId,
                     text: text
+                },
+                {
+                    family: 4
                 }
             );
         } catch (error) {
@@ -305,7 +311,8 @@ class TelegramWebhookHandler {
                 {
                     url: webhookUrl,
                     allowed_updates: ['message', 'callback_query']
-                },{
+                },
+                {
                     family: 4
                 }
             );
