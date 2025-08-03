@@ -7,7 +7,8 @@
       "Bash(tmux capture-pane:*)",
       "Bash(tmux send-keys:*)",
       "Bash(git check-ignore:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }

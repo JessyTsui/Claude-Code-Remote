@@ -358,5 +358,23 @@
     "sessionId": "42c52cdc-bc6e-4702-8ec6-ca34c2fde89a",
     "tmuxSession": "claude-session",
     "description": "completed - Claude-Code-Remote"
+  },
+  "BJJXX0GX": {
+    "type": "tmux",
+    "createdAt": 1754230386,
+    "expiresAt": 1754316786,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "386560eb-295c-49c9-82e6-4651be76ddcf",
+    "tmuxSession": "claude-code-remote",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "6NYBDU2U": {
+    "type": "tmux",
+    "createdAt": 1754230593,
+    "expiresAt": 1754316993,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "422ab5ee-9bec-4d23-80e5-ee1b1698e739",
+    "tmuxSession": "claude-code-remote",
+    "description": "completed - Claude-Code-Remote"
   }
 }
