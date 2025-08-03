@@ -22,17 +22,17 @@ const EmailChannel = require('./src/channels/email/smtp');
 async function sendCompactNotification(commandInfo = null) {
     try {
         console.log('🎉 Sending compact completion notification...');
-        
+
         const channels = [];
         const results = [];
-        
+
         // Configure Desktop channel
         const desktopChannel = new DesktopChannel({
             completedSound: 'Glass',
             waitingSound: 'Tink'
         });
         channels.push({ name: 'Desktop', channel: desktopChannel });
-        
+
         // Configure Telegram channel if enabled
         if (process.env.TELEGRAM_ENABLED === 'true' && process.env.TELEGRAM_BOT_TOKEN) {
             const telegramConfig = {
@@ -40,13 +40,13 @@ async function sendCompactNotification(commandInfo = null) {
                 chatId: process.env.TELEGRAM_CHAT_ID,
                 groupId: process.env.TELEGRAM_GROUP_ID
             };
-            
+
             if (telegramConfig.botToken && (telegramConfig.chatId || telegramConfig.groupId)) {
                 const telegramChannel = new TelegramChannel(telegramConfig);
                 channels.push({ name: 'Telegram', channel: telegramChannel });
             }
         }
-        
+
         // Configure Email channel if enabled
         if (process.env.EMAIL_ENABLED === 'true' && process.env.SMTP_USER) {
             const emailConfig = {
@@ -63,22 +63,22 @@ async function sendCompactNotification(commandInfo = null) {
                 fromName: process.env.EMAIL_FROM_NAME,
                 to: process.env.EMAIL_TO
             };
-            
+
             if (emailConfig.smtp.host && emailConfig.smtp.auth.user && emailConfig.to) {
                 const emailChannel = new EmailChannel(emailConfig);
                 channels.push({ name: 'Email', channel: emailChannel });
             }
         }
-        
+
         // Get current working directory and tmux session
         const currentDir = process.cwd();
         const projectName = path.basename(currentDir);
-        
+
         // Try to get current tmux session
         let tmuxSession = process.env.TMUX_SESSION || 'claude-session';
         try {
             const { execSync } = require('child_process');
-            const sessionOutput = execSync('tmux display-message -p "#S"', { 
+            const sessionOutput = execSync('tmux display-message -p "#S"', {
                 encoding: 'utf8',
                 stdio: ['ignore', 'pipe', 'ignore']
             }).trim();
@@ -88,7 +88,7 @@ async function sendCompactNotification(commandInfo = null) {
         } catch (error) {
             // Not in tmux or tmux not available, use default
         }
-        
+
         // Create compact notification
         const notification = {
             type: 'completed',
@@ -105,16 +105,16 @@ async function sendCompactNotification(commandInfo = null) {
                 timestamp: new Date().toISOString()
             }
         };
-        
+
         console.log(`🎉 Sending compact notification for: ${notification.metadata.userQuestion}`);
-        
+
         // Send notifications to all configured channels
         for (const { name, channel } of channels) {
             try {
                 console.log(`📤 Sending to ${name}...`);
                 const result = await channel.send(notification);
                 results.push({ name, success: result });
-                
+
                 if (result) {
                     console.log(`✅ ${name} notification sent successfully!`);
                 } else {
@@ -125,18 +125,18 @@ async function sendCompactNotification(commandInfo = null) {
                 results.push({ name, success: false, error: error.message });
             }
         }
-        
+
         // Report overall results
         const successful = results.filter(r => r.success).length;
         const total = results.length;
-        
+
         if (successful > 0) {
             console.log(`\n✅ Successfully sent compact notifications via ${successful}/${total} channels`);
         } else {
             console.log('\n❌ All notification channels failed');
             process.exit(1);
         }
-        
+
     } catch (error) {
         console.error('❌ Compact notification error:', error.message);
         process.exit(1);

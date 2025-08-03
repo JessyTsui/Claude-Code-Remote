@@ -259,5 +259,104 @@
     "sessionId": "7ba68143-8f3c-4cab-b503-749d66d25fec",
     "tmuxSession": "claude-session",
     "description": "completed - Claude-Code-Remote"
+  },
+  "QPQ6YP7X": {
+    "type": "tmux",
+    "createdAt": 1754211593,
+    "expiresAt": 1754297993,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "44e92fbb-aab0-4aa8-89e4-0d86ffc7edb0",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "DD1X7G5E": {
+    "type": "tmux",
+    "createdAt": 1754212407,
+    "expiresAt": 1754298807,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "ef4b0ff2-d1c4-41f1-bdc4-1ac6d6dc27e7",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "KBZYGCMR": {
+    "type": "tmux",
+    "createdAt": 1754212915,
+    "expiresAt": 1754299315,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "59b5062a-40fb-476b-829e-453345d9fa81",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote-Test"
+  },
+  "K8JM1SU0": {
+    "type": "tmux",
+    "createdAt": 1754214483,
+    "expiresAt": 1754300883,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "196ffd94-5062-4829-acef-9e8e1fcb49b1",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "YV3MM4RX": {
+    "type": "tmux",
+    "createdAt": 1754214808,
+    "expiresAt": 1754301208,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "0667aaf8-637d-4852-aa73-e7138bf1c2fb",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "UUDYYP3M": {
+    "type": "tmux",
+    "createdAt": 1754215198,
+    "expiresAt": 1754301598,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "af8c5012-9489-488e-9b93-4b9b277a45c0",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "SQA3VBVU": {
+    "type": "tmux",
+    "createdAt": 1754216052,
+    "expiresAt": 1754302452,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "39026e5a-a32f-42e9-8831-813032613598",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "QTNZMQ46": {
+    "type": "tmux",
+    "createdAt": 1754216657,
+    "expiresAt": 1754303057,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "e54cc4a2-3a66-455c-8032-ec8e0fa1b8c4",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "HV6OYZUW": {
+    "type": "tmux",
+    "createdAt": 1754218053,
+    "expiresAt": 1754304453,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "279c0bcd-f125-4949-9f04-5fe4bb748f76",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "HD9ESCSP": {
+    "type": "tmux",
+    "createdAt": 1754219256,
+    "expiresAt": 1754305656,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "92a047dd-8470-4acb-ad5a-0a00a535ad29",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote"
+  },
+  "TMJL2N5O": {
+    "type": "tmux",
+    "createdAt": 1754219472,
+    "expiresAt": 1754305872,
+    "cwd": "/Users/mac/tools/Claude-Code-Remote",
+    "sessionId": "42c52cdc-bc6e-4702-8ec6-ca34c2fde89a",
+    "tmuxSession": "claude-session",
+    "description": "completed - Claude-Code-Remote"
   }
 }

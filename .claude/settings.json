@@ -1,0 +1,24 @@
+{
+  "feedbackSurveyState": {
+    "lastShownTime": 1754020242650
+  },
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "Stop": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "node /Users/mac/tools/Claude-Code-Remote/claude-hook-notify.js completed",
+        "timeout": 5
+      }]
+    }],
+    "SubagentStop": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "node /Users/mac/tools/Claude-Code-Remote/claude-hook-notify.js waiting",
+        "timeout": 5
+      }]
+    }]
+  }
+}

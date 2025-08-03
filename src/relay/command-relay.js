@@ -230,56 +230,26 @@ class CommandRelayService extends EventEmitter {
     }
 
     async _findClaudeCodeProcess() {
-        return new Promise((resolve) => {
-            // Find Claude Code related processes
-            const ps = spawn('ps', ['aux']);
-            let output = '';
-
-            ps.stdout.on('data', (data) => {
-                output += data.toString();
-            });
-
-            ps.on('close', (code) => {
-                const lines = output.split('\n');
-                const claudeProcesses = lines.filter(line => 
-                    (line.includes('claude') || 
-                     line.includes('anthropic') ||
-                     line.includes('Claude') ||
-                     line.includes('node') && line.includes('claude')) && 
-                    !line.includes('grep') &&
-                    !line.includes('taskping') &&
-                    !line.includes('ps aux')
-                );
-
-                if (claudeProcesses.length > 0) {
-                    // Parse process ID
-                    const processLine = claudeProcesses[0];
-                    const parts = processLine.trim().split(/\s+/);
-                    const pid = parseInt(parts[1]);
-                    
-                    this.logger.debug('Found Claude Code process:', processLine);
-                    resolve({
-                        pid,
-                        command: processLine
-                    });
-                } else {
-                    // If no process found, assume Claude Code can be accessed via desktop automation
-                    this.logger.debug('No Claude Code process found, will try desktop automation');
-                    resolve({ pid: null, available: true });
-                }
-            });
-
-            ps.on('error', (error) => {
-                this.logger.error('Error finding Claude Code process:', error.message);
-                // Even if error occurs, try desktop automation
-                resolve({ pid: null, available: true });
-            });
-        });
+        // Always return available for tmux mode
+        this.logger.debug('Using tmux mode - Claude Code assumed available');
+        return { pid: null, available: true, tmuxMode: true };
     }
 
     async _sendCommandToClaudeCode(command, claudeProcess, sessionId) {
         return new Promise(async (resolve) => {
             try {
+                // For tmux mode, use direct tmux injection first
+                if (process.env.INJECTION_MODE === 'tmux') {
+                    this.logger.info('Using direct tmux injection...');
+                    const tmuxSuccess = await this._sendCommandViaTmux(command);
+                    
+                    if (tmuxSuccess) {
+                        this.logger.info('Command sent successfully via tmux injection');
+                        resolve(true);
+                        return;
+                    }
+                }
+                
                 // Method 1: Claude Code dedicated automation (most direct and reliable)
                 this.logger.info('Attempting to send command via Claude automation...');
                 const claudeSuccess = await this.claudeAutomation.sendCommand(command, sessionId);
@@ -334,6 +304,36 @@ class CommandRelayService extends EventEmitter {
                 
             } catch (error) {
                 this.logger.error('Error sending command to Claude Code:', error.message);
+                resolve(false);
+            }
+        });
+    }
+
+    async _sendCommandViaTmux(command) {
+        return new Promise((resolve) => {
+            try {
+                const tmuxSession = process.env.TMUX_SESSION || 'claude-session';
+                this.logger.info(`Injecting command into tmux session: ${tmuxSession}`);
+                
+                const tmuxProcess = spawn('tmux', ['send-keys', '-t', tmuxSession, command, 'Enter']);
+                
+                tmuxProcess.on('close', (code) => {
+                    if (code === 0) {
+                        this.logger.info('✅ Command injected successfully via tmux');
+                        resolve(true);
+                    } else {
+                        this.logger.warn('❌ Tmux injection failed with code:', code);
+                        resolve(false);
+                    }
+                });
+                
+                tmuxProcess.on('error', (error) => {
+                    this.logger.error('❌ Tmux injection error:', error.message);
+                    resolve(false);
+                });
+                
+            } catch (error) {
+                this.logger.error('❌ Tmux injection failed:', error.message);
                 resolve(false);
             }
         });

@@ -53,4 +53,3 @@ src/data/
 !src/data/.gitkeep
 
 # Claude configuration (user-specific)
-CLAUDE.md
