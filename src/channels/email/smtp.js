@@ -163,10 +163,13 @@ class EmailChannel extends NotificationChannel {
     }
 
     async _createSession(sessionId, notification, token) {
+        const sessionType = process.env.INJECTION_MODE || 'pty';
+        const tmuxSession = notification.metadata?.tmuxSession || this._getCurrentTmuxSession() || 'claude-code-remote';
+        
         const session = {
             id: sessionId,
             token: token,
-            type: 'pty',
+            type: sessionType,
             created: new Date().toISOString(),
             expires: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Expires after 24 hours
             createdAt: Math.floor(Date.now() / 1000),
@@ -181,6 +184,11 @@ class EmailChannel extends NotificationChannel {
             commandCount: 0,
             maxCommands: 10
         };
+        
+        // Add tmuxSession for tmux mode
+        if (sessionType === 'tmux') {
+            session.tmuxSession = tmuxSession;
+        }
 
         const sessionFile = path.join(this.sessionsDir, `${sessionId}.json`);
         fs.writeFileSync(sessionFile, JSON.stringify(session, null, 2));
@@ -196,11 +204,8 @@ class EmailChannel extends NotificationChannel {
             }
         }
         
-        // Use passed tmux session name or detect current session
-        let tmuxSession = notification.metadata?.tmuxSession || this._getCurrentTmuxSession() || 'claude-code-remote';
-        
         sessionMap[token] = {
-            type: 'pty',
+            type: sessionType,
             createdAt: Math.floor(Date.now() / 1000),
             expiresAt: Math.floor((Date.now() + 24 * 60 * 60 * 1000) / 1000),
             cwd: process.cwd(),

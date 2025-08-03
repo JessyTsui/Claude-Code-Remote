@@ -174,31 +174,32 @@ class TelegramChannel extends NotificationChannel {
 
     _generateTelegramMessage(notification, sessionId, token) {
         const type = notification.type;
-        const emoji = type === 'completed' ? '✅' : '⏳';
-        const status = type === 'completed' ? 'Completed' : 'Waiting for Input';
+        const emoji = type === 'completed' ? '🎉' : '⏳';
         
-        let messageText = `${emoji} *Claude Task ${status}*\n`;
-        messageText += `*Project:* ${notification.project}\n`;
-        messageText += `*Session Token:* \`${token}\`\n\n`;
+        // Compact format
+        let messageText = `${emoji} *Task ${type === 'completed' ? 'Completed' : 'Waiting'}*\n`;
         
         if (notification.metadata) {
             if (notification.metadata.userQuestion) {
-                messageText += `📝 *Your Question:*\n${notification.metadata.userQuestion.substring(0, 200)}`;
-                if (notification.metadata.userQuestion.length > 200) {
-                    messageText += '...';
-                }
-                messageText += '\n\n';
+                const question = notification.metadata.userQuestion.substring(0, 100);
+                messageText += `📝 *Your Question:* ${question}${notification.metadata.userQuestion.length > 100 ? '...' : ''}\n`;
             }
             
             if (notification.metadata.claudeResponse) {
-                messageText += `🤖 *Claude Response:*\n${notification.metadata.claudeResponse.substring(0, 300)}`;
-                if (notification.metadata.claudeResponse.length > 300) {
-                    messageText += '...';
-                }
-                messageText += '\n\n';
+                const response = notification.metadata.claudeResponse.substring(0, 150);
+                messageText += `🤖 *Claude Response:* ${response}${notification.metadata.claudeResponse.length > 150 ? '...' : ''}\n`;
+            }
+            
+            // Add execution info if available
+            if (notification.metadata.executionTime) {
+                messageText += `⏱️ *Time:* ${notification.metadata.executionTime}s\n`;
+            }
+            if (notification.metadata.tokens) {
+                messageText += `⚒️ *Tokens:* ${notification.metadata.tokens}\n`;
             }
         }
         
+        messageText += `\n🔑 *Token:* \`${token}\`\n\n`;
         messageText += `💬 *To send a new command:*\n`;
         messageText += `Reply with: \`/cmd ${token} <your command>\`\n`;
         messageText += `Example: \`/cmd ${token} Please analyze this code\``;

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /Users/path/to/Claude-Code-Remote/claude-hook-notify.js completed",
+            "command": "node /Users/mac/tools/Claude-Code-Remote/claude-hook-notify.js completed",
             "timeout": 5
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command", 
-            "command": "node /Users/path/to/Claude-Code-Remote/claude-hook-notify.js waiting",
+            "command": "node /Users/mac/tools/Claude-Code-Remote/claude-hook-notify.js waiting",
             "timeout": 5
           }
         ]

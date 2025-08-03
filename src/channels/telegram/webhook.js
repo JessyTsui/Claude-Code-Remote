@@ -10,6 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const Logger = require('../../core/logger');
 const ControllerInjector = require('../../utils/controller-injector');
+const EnhancedInjector = require('../../../enhanced-injector');
 
 class TelegramWebhookHandler {
     constructor(config = {}) {
@@ -17,6 +18,7 @@ class TelegramWebhookHandler {
         this.logger = new Logger('TelegramWebhook');
         this.sessionsDir = path.join(__dirname, '../../data/sessions');
         this.injector = new ControllerInjector();
+        this.enhancedInjector = new EnhancedInjector();
         this.app = express();
         this.apiBaseUrl = 'https://api.telegram.org';
         this.botUsername = null; // Cache for bot username
@@ -137,17 +139,47 @@ class TelegramWebhookHandler {
         }
 
         try {
-            // Inject command into tmux session
-            const tmuxSession = session.tmuxSession || 'default';
-            await this.injector.injectCommand(command, tmuxSession);
+            // Inject command using token (for PTY mode) or tmux session (for tmux mode)
+            const sessionIdentifier = process.env.INJECTION_MODE === 'tmux' ? 
+                (session.tmuxSession || 'default') : token;
+            
+            // Store command info for completion notification
+            const commandInfo = {
+                command: command,
+                chatId: chatId,
+                token: token,
+                timestamp: Date.now(),
+                sessionIdentifier: sessionIdentifier
+            };
+            
+            // For tmux mode, add notification trigger after command
+            if (process.env.INJECTION_MODE === 'tmux') {
+                const projectDir = path.dirname(path.dirname(path.dirname(__dirname)));
+                
+                // Create enhanced command with compact notification
+                const commandInfoStr = JSON.stringify(commandInfo).replace(/"/g, '\\"');
+                const enhancedCommand = `${command}; echo "✅ Command completed"; node ${projectDir}/compact-notification-trigger.js '${commandInfoStr}'`;
+                await this.injector.injectCommand(enhancedCommand, sessionIdentifier);
+            } else {
+                await this.injector.injectCommand(command, sessionIdentifier);
+            }
             
             // Send confirmation
             await this._sendMessage(chatId, 
-                `✅ *Command sent successfully*\n\n📝 *Command:* ${command}\n🖥️ *Session:* ${tmuxSession}\n\nClaude is now processing your request...`,
+                `✅ *Command sent successfully*\n\n📝 *Command:* ${command}\n🖥️ *Session:* ${sessionIdentifier}\n\nClaude is now processing your request...`,
                 { parse_mode: 'Markdown' });
             
             // Log command execution
             this.logger.info(`Command injected - User: ${chatId}, Token: ${token}, Command: ${command}`);
+            
+            // Schedule completion check after a delay
+            setTimeout(async () => {
+                try {
+                    await this._checkAndNotifyCompletion(chatId, token, command, sessionIdentifier);
+                } catch (error) {
+                    this.logger.error('Completion check failed:', error.message);
+                }
+            }, 5000); // Check after 5 seconds
             
         } catch (error) {
             this.logger.error('Command injection failed:', error.message);
@@ -279,6 +311,44 @@ class TelegramWebhookHandler {
         if (fs.existsSync(sessionFile)) {
             fs.unlinkSync(sessionFile);
             this.logger.debug(`Session removed: ${sessionId}`);
+        }
+    }
+
+    async _checkAndNotifyCompletion(chatId, token, command, sessionIdentifier) {
+        const { execSync } = require('child_process');
+        
+        try {
+            // Capture current tmux output
+            const output = execSync(`tmux capture-pane -t ${sessionIdentifier} -p`, { 
+                encoding: 'utf8',
+                timeout: 5000
+            });
+            
+            // Simple heuristic: if output contains command and some result
+            const lines = output.split('\n');
+            const commandFound = lines.some(line => line.includes(command.substring(0, 20)));
+            
+            if (commandFound) {
+                // Get last few lines as result
+                const lastLines = lines.slice(-5).filter(line => line.trim()).join('\n');
+                
+                await this._sendMessage(chatId, 
+                    `🎉 *Command completed!*\n\n📝 *Command:* ${command}\n\n📋 *Result:*\n\`\`\`\n${lastLines}\n\`\`\`\n\n💡 *You can send another command with the same token.*`,
+                    { parse_mode: 'Markdown' });
+                
+                this.logger.info(`Completion notification sent for command: ${command}`);
+            } else {
+                // Command might still be running, check again later
+                setTimeout(async () => {
+                    try {
+                        await this._checkAndNotifyCompletion(chatId, token, command, sessionIdentifier);
+                    } catch (error) {
+                        this.logger.debug('Second completion check failed:', error.message);
+                    }
+                }, 10000); // Check again after 10 seconds
+            }
+        } catch (error) {
+            this.logger.error('Failed to check completion:', error.message);
         }
     }
 
