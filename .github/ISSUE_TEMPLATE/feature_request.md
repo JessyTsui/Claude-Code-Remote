@@ -25,10 +25,13 @@ Format: [FEATURE] Short clear description of the feature
 - Discord support (no [FEATURE] prefix)
 - [FEATURE] Improvement (not specific enough)
 
-📋 AVAILABLE ISSUE TYPES:
+📋 ISSUE TYPES AVAILABLE:
 1. 🐛 Bug Report - Report broken functionality
 2. ✨ Feature Request (this template) - Request new features
-3. Create Discussion instead for questions
+3. ❓ Question - Ask questions
+4. 🔒 Security - Report security issues
+5. ⚡ Performance - Report performance issues
+6. 🔧 Enhancement - Suggest improvements
 -->
 
 ## Feature Type (select one)

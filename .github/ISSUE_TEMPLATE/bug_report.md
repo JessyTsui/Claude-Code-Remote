@@ -24,10 +24,13 @@ Format: [BUG] Short clear description of the problem
 - Telegram issue (no [BUG] prefix, not descriptive)
 - [BUG] Problem (not descriptive enough)
 
-📋 AVAILABLE ISSUE TYPES:
+📋 ISSUE TYPES AVAILABLE:
 1. 🐛 Bug Report (this template) - Report broken functionality
 2. ✨ Feature Request - Request new features
-3. Create Discussion instead for questions
+3. ❓ Question - Ask questions
+4. 🔒 Security - Report security issues
+5. ⚡ Performance - Report performance issues
+6. 🔧 Enhancement - Suggest improvements
 -->
 
 ## Bug Type (select one)
