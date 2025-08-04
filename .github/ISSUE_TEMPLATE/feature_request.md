@@ -28,7 +28,11 @@ Format: [FEATURE] Short clear description of the feature
 📋 AVAILABLE ISSUE TYPES:
 1. 🐛 Bug Report - Report broken functionality
 2. ✨ Feature Request (this template) - Request new features
-3. Create Discussion instead for questions
+3. ❓ Question - Ask usage questions
+4. 🔒 Security Report - Report security vulnerabilities
+5. ⚡ Performance Issue - Report performance problems
+6. 🔧 Enhancement - Suggest improvements to existing features
+7. 💬 Discussion - General discussions and brainstorming
 -->
 
 ## Feature Type (select one)

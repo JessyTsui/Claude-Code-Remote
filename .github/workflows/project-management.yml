@@ -37,6 +37,10 @@ jobs:
           if (title.includes('[bug]')) labels.push('type:bug');
           if (title.includes('[feature]')) labels.push('type:enhancement');
           if (title.includes('[question]')) labels.push('type:question');
+          if (title.includes('[security]')) labels.push('type:security');
+          if (title.includes('[performance]')) labels.push('type:performance');
+          if (title.includes('[enhancement]')) labels.push('type:enhancement');
+          if (title.includes('[discussion]')) labels.push('type:discussion');
           
           if (labels.length > 0) {
             await github.rest.issues.addLabels({

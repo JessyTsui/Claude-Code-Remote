@@ -27,7 +27,11 @@ Format: [BUG] Short clear description of the problem
 📋 AVAILABLE ISSUE TYPES:
 1. 🐛 Bug Report (this template) - Report broken functionality
 2. ✨ Feature Request - Request new features
-3. Create Discussion instead for questions
+3. ❓ Question - Ask usage questions
+4. 🔒 Security Report - Report security vulnerabilities
+5. ⚡ Performance Issue - Report performance problems
+6. 🔧 Enhancement - Suggest improvements to existing features
+7. 💬 Discussion - General discussions and brainstorming
 -->
 
 ## Bug Type (select one)
