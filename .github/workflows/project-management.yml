@@ -1,0 +1,186 @@
+name: Project Management
+
+on:
+  issues:
+    types: [opened, edited, labeled]
+  pull_request:
+    types: [opened, edited, synchronize]
+  schedule:
+    - cron: '0 0 * * 0' # Weekly cleanup on Sunday
+
+jobs:
+  # Auto-label issues and PRs
+  auto-label:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' || github.event_name == 'pull_request'
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+    - name: Auto-label based on content
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const isIssue = !!context.payload.issue;
+          const item = context.payload.issue || context.payload.pull_request;
+          const body = (item.body || '').toLowerCase();
+          const title = (item.title || '').toLowerCase();
+          const labels = [];
+          
+          // Platform labels
+          if (title.includes('telegram') || body.includes('telegram')) labels.push('platform:telegram');
+          if (title.includes('email') || body.includes('email')) labels.push('platform:email');
+          if (title.includes('line') || body.includes('line')) labels.push('platform:line');
+          if (title.includes('discord') || body.includes('discord')) labels.push('platform:discord');
+          
+          // Priority labels
+          if (title.includes('critical') || body.includes('critical')) labels.push('priority:high');
+          if (title.includes('urgent') || body.includes('urgent')) labels.push('priority:high');
+          
+          // Type labels for issues
+          if (isIssue) {
+            if (title.includes('[bug]')) labels.push('type:bug');
+            if (title.includes('[feature]')) labels.push('type:enhancement');
+            if (title.includes('[question]')) labels.push('type:question');
+          }
+          
+          if (labels.length > 0) {
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: item.number,
+              labels: labels
+            });
+          }
+
+  # Code quality check for PRs
+  code-quality:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check for hardcoded values
+      run: |
+        echo "🔍 Checking for hardcoded secrets and values..."
+        
+        # Check for hardcoded tokens/secrets
+        if grep -r "TELEGRAM_BOT_TOKEN\s*=\s*['\"]" --include="*.js" .; then
+          echo "❌ ERROR: Hardcoded Telegram token found!"
+          exit 1
+        fi
+        
+        if grep -r "LINE_CHANNEL_ACCESS_TOKEN\s*=\s*['\"]" --include="*.js" .; then
+          echo "❌ ERROR: Hardcoded LINE token found!"
+          exit 1
+        fi
+        
+        if grep -r "SMTP_PASS\s*=\s*['\"]" --include="*.js" .; then
+          echo "❌ ERROR: Hardcoded email password found!"
+          exit 1
+        fi
+        
+        # Check for hardcoded URLs/IPs
+        if grep -r "https://api\.telegram\.org/bot[0-9]" --include="*.js" . | grep -v "process.env"; then
+          echo "❌ ERROR: Hardcoded Telegram API URL with token found!"
+          exit 1
+        fi
+        
+        # Check for console.log in production code (exclude test files)
+        if find src/ -name "*.js" -not -path "*/test/*" -exec grep -l "console\.log" {} \; | head -1; then
+          echo "❌ ERROR: console.log found in production code!"
+          echo "Use proper logging (logger.info, logger.error) instead"
+          exit 1
+        fi
+        
+        echo "✅ Code quality checks passed!"
+    
+    - name: Check for proper error handling
+      run: |
+        echo "🔍 Checking error handling patterns..."
+        
+        # Find async functions without try-catch
+        if grep -r "async function" --include="*.js" src/ | head -5; then
+          echo "⚠️  WARNING: Make sure all async functions have proper error handling"
+        fi
+        
+        # Check for fetch without error handling
+        if grep -r "fetch(" --include="*.js" src/ | grep -v "try\|catch" | head -3; then
+          echo "⚠️  WARNING: HTTP requests should have error handling"
+        fi
+    
+    - name: Comment on PR if issues found
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## ⚠️ Code Quality Issues Found
+            
+            Your PR has some code quality issues that need to be fixed:
+            
+            ### 🚫 Common Issues to Fix:
+            - **Hardcoded secrets**: Use \`process.env.TOKEN_NAME\` instead
+            - **console.log**: Use proper logging (\`logger.info\`, \`logger.error\`)
+            - **Missing error handling**: Wrap async calls in try-catch
+            - **Hardcoded URLs**: Use configuration files
+            
+            ### ✅ Best Practices:
+            \`\`\`javascript
+            // ❌ Bad
+            const token = "123456789:ABC...";
+            console.log("Debug info");
+            
+            // ✅ Good  
+            const token = process.env.TELEGRAM_BOT_TOKEN;
+            logger.info("Operation completed");
+            \`\`\`
+            
+            Please fix these issues and push new commits. The checks will run again automatically.`
+          })
+
+  # Weekly maintenance
+  weekly-cleanup:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+    - name: Close stale issues
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { data: issues } = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'open',
+            labels: 'question',
+            sort: 'updated',
+            direction: 'asc',
+            per_page: 100
+          });
+          
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          
+          for (const issue of issues) {
+            if (new Date(issue.updated_at) < thirtyDaysAgo) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: 'This question has been inactive for 30 days and will be closed. Feel free to reopen if you still need help.'
+              });
+              
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+            }
+          }
