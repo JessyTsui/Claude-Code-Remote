@@ -32,6 +32,7 @@ Format: [FEATURE] Short clear description of the feature
 4. 🔒 Security - Report security issues
 5. ⚡ Performance - Report performance issues
 6. 🔧 Enhancement - Suggest improvements
+7. 💬 Discussion - General discussions
 -->
 
 ## Feature Type (select one)

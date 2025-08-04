@@ -31,6 +31,7 @@ Format: [BUG] Short clear description of the problem
 4. 🔒 Security - Report security issues
 5. ⚡ Performance - Report performance issues
 6. 🔧 Enhancement - Suggest improvements
+7. 💬 Discussion - General discussions
 -->
 
 ## Bug Type (select one)

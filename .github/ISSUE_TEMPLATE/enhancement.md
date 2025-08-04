@@ -30,6 +30,7 @@ Format: [ENHANCEMENT] Short clear description of the improvement
 4. 🔒 Security - Report security issues
 5. ⚡ Performance - Report performance issues
 6. 🔧 Enhancement (this template) - Suggest improvements
+7. 💬 Discussion - General discussions
 -->
 
 ## Enhancement Type (select one)

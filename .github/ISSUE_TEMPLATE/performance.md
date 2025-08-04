@@ -30,6 +30,7 @@ Format: [PERFORMANCE] Short clear description of the performance issue
 4. 🔒 Security - Report security issues
 5. ⚡ Performance (this template) - Report performance issues
 6. 🔧 Enhancement - Suggest improvements
+7. 💬 Discussion - General discussions
 -->
 
 ## Performance Issue Type (select one)

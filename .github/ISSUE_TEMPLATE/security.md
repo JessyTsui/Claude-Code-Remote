@@ -31,6 +31,7 @@ private vulnerability reporting instead of public issues.
 4. 🔒 Security (this template) - Report security issues
 5. ⚡ Performance - Report performance issues
 6. 🔧 Enhancement - Suggest improvements
+7. 💬 Discussion - General discussions
 -->
 
 ## Security Issue Type (select one)

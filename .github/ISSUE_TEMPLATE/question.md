@@ -30,6 +30,7 @@ Format: [QUESTION] Short clear description of your question
 4. 🔒 Security - Report security issues
 5. ⚡ Performance - Report performance issues
 6. 🔧 Enhancement - Suggest improvements
+7. 💬 Discussion - General discussions
 -->
 
 ## Question Type (select one)
