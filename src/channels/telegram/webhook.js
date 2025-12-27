@@ -54,15 +54,26 @@ class TelegramWebhookHandler {
 
     async _handleWebhook(req, res) {
         try {
+            // Verify webhook secret token if configured
+            // This prevents forged POSTs from attackers who guess chat_id/user_id
+            const webhookSecret = this.config.webhookSecret;
+            if (webhookSecret) {
+                const headerSecret = req.get('X-Telegram-Bot-Api-Secret-Token');
+                if (!headerSecret || headerSecret !== webhookSecret) {
+                    this.logger.warn('Webhook request rejected: invalid or missing secret token');
+                    return res.sendStatus(401);
+                }
+            }
+
             const update = req.body;
-            
+
             // Handle different update types
             if (update.message) {
                 await this._handleMessage(update.message);
             } else if (update.callback_query) {
                 await this._handleCallbackQuery(update.callback_query);
             }
-            
+
             res.status(200).send('OK');
         } catch (error) {
             this.logger.error('Webhook handling error:', error.message);
@@ -315,12 +326,20 @@ class TelegramWebhookHandler {
 
     async setWebhook(webhookUrl) {
         try {
+            const payload = {
+                url: webhookUrl,
+                allowed_updates: ['message', 'callback_query']
+            };
+
+            // Include secret_token if configured
+            // Telegram will send this in X-Telegram-Bot-Api-Secret-Token header
+            if (this.config.webhookSecret) {
+                payload.secret_token = this.config.webhookSecret;
+            }
+
             const response = await axios.post(
                 `${this.apiBaseUrl}/bot${this.config.botToken}/setWebhook`,
-                {
-                    url: webhookUrl,
-                    allowed_updates: ['message', 'callback_query']
-                },
+                payload,
                 this._getNetworkOptions()
             );
 

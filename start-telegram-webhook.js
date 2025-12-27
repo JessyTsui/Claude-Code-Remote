@@ -26,7 +26,8 @@ const config = {
     groupId: process.env.TELEGRAM_GROUP_ID,
     whitelist: process.env.TELEGRAM_WHITELIST ? process.env.TELEGRAM_WHITELIST.split(',').map(id => id.trim()) : [],
     port: process.env.TELEGRAM_WEBHOOK_PORT || 3001,
-    webhookUrl: process.env.TELEGRAM_WEBHOOK_URL
+    webhookUrl: process.env.TELEGRAM_WEBHOOK_URL,
+    webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET
 };
 
 // Validate configuration
@@ -40,6 +41,11 @@ if (!config.chatId && !config.groupId) {
     process.exit(1);
 }
 
+if (!config.webhookSecret) {
+    logger.warn('TELEGRAM_WEBHOOK_SECRET not set. Webhook endpoint is vulnerable to forged requests.');
+    logger.warn('Generate a secret with: openssl rand -hex 32');
+}
+
 // Create and start webhook handler
 const webhookHandler = new TelegramWebhookHandler(config);
 
@@ -50,7 +56,8 @@ async function start() {
     logger.info(`- Chat ID: ${config.chatId || 'Not set'}`);
     logger.info(`- Group ID: ${config.groupId || 'Not set'}`);
     logger.info(`- Whitelist: ${config.whitelist.length > 0 ? config.whitelist.join(', ') : 'None (using configured IDs)'}`);
-    
+    logger.info(`- Webhook Secret: ${config.webhookSecret ? 'Configured' : 'NOT SET (insecure)'}`);
+
     // Set webhook if URL is provided
     if (config.webhookUrl) {
         try {
@@ -60,12 +67,13 @@ async function start() {
         } catch (error) {
             logger.error('Failed to set webhook:', error.message);
             logger.info('You can manually set the webhook using:');
-            logger.info(`curl -X POST https://api.telegram.org/bot${config.botToken}/setWebhook -d "url=${config.webhookUrl}/webhook/telegram"`);
+            const secretParam = config.webhookSecret ? ` -d "secret_token=${config.webhookSecret}"` : '';
+            logger.info(`curl -X POST https://api.telegram.org/bot${config.botToken}/setWebhook -d "url=${config.webhookUrl}/webhook/telegram"${secretParam}`);
         }
     } else {
         logger.warn('TELEGRAM_WEBHOOK_URL not set. Please set the webhook manually.');
         logger.info('To set webhook manually, use:');
-        logger.info(`curl -X POST https://api.telegram.org/bot${config.botToken}/setWebhook -d "url=https://your-domain.com/webhook/telegram"`);
+        logger.info(`curl -X POST https://api.telegram.org/bot${config.botToken}/setWebhook -d "url=https://your-domain.com/webhook/telegram" -d "secret_token=YOUR_SECRET"`);
     }
     
     webhookHandler.start(config.port);
