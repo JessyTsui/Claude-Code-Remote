@@ -36,6 +36,46 @@ const TelegramChannel = require('./src/channels/telegram/telegram');
 const DesktopChannel = require('./src/channels/local/desktop');
 const EmailChannel = require('./src/channels/email/smtp');
 
+/**
+ * Read hook data from stdin (Claude Code passes JSON via stdin to hooks)
+ */
+function readStdin() {
+    return new Promise((resolve) => {
+        if (process.stdin.isTTY) {
+            resolve(null);
+            return;
+        }
+
+        let data = '';
+        let resolved = false;
+
+        const done = (value) => {
+            if (resolved) return;
+            resolved = true;
+            clearTimeout(timer);
+            process.stdin.removeListener('data', onData);
+            process.stdin.removeListener('end', onEnd);
+            resolve(value);
+        };
+
+        const onData = (chunk) => { data += chunk; };
+        const onEnd = () => {
+            if (!data.trim()) { done(null); return; }
+            try {
+                done(JSON.parse(data));
+            } catch (e) {
+                done(null);
+            }
+        };
+
+        process.stdin.setEncoding('utf8');
+        process.stdin.on('data', onData);
+        process.stdin.on('end', onEnd);
+
+        const timer = setTimeout(() => done(null), 1000);
+    });
+}
+
 async function sendHookNotification() {
     try {
         console.log('🔔 Claude Hook: Sending notifications...');
@@ -93,12 +133,12 @@ async function sendHookNotification() {
         // Get current working directory and tmux session
         const currentDir = process.cwd();
         const projectName = path.basename(currentDir);
-        
+
         // Try to get current tmux session
         let tmuxSession = process.env.TMUX_SESSION || 'claude-real';
         try {
             const { execSync } = require('child_process');
-            const sessionOutput = execSync('tmux display-message -p "#S"', { 
+            const sessionOutput = execSync('tmux display-message -p "#S"', {
                 encoding: 'utf8',
                 stdio: ['ignore', 'pipe', 'ignore']
             }).trim();
@@ -108,16 +148,52 @@ async function sendHookNotification() {
         } catch (error) {
             // Not in tmux or tmux not available, use default
         }
-        
+
+        // Read hook data from stdin — Claude Code hooks pass JSON with result/transcript
+        const hookData = await readStdin();
+
+        let userQuestion = '';
+        let claudeResponse = '';
+
+        if (hookData) {
+            // Extract from hook result or transcript_summary
+            if (hookData.result) {
+                claudeResponse = typeof hookData.result === 'string'
+                    ? hookData.result
+                    : JSON.stringify(hookData.result);
+            }
+            if (hookData.transcript_summary) {
+                claudeResponse = claudeResponse || hookData.transcript_summary;
+            }
+            if (hookData.input) {
+                userQuestion = typeof hookData.input === 'string'
+                    ? hookData.input
+                    : JSON.stringify(hookData.input);
+            }
+            if (hookData.session_id) {
+                tmuxSession = hookData.session_id;
+            }
+        }
+
         // Create notification
         const notification = {
             type: notificationType,
             title: `Claude ${notificationType === 'completed' ? 'Task Completed' : 'Waiting for Input'}`,
-            message: `Claude has ${notificationType === 'completed' ? 'completed a task' : 'is waiting for input'}`,
+            message: notificationType === 'completed'
+                ? 'Claude has completed a task'
+                : 'Claude is waiting for input',
             project: projectName
-            // Don't set metadata here - let TelegramChannel extract real conversation content
         };
-        
+
+        // Set metadata from stdin data if available; otherwise let TelegramChannel try tmux capture
+        if (userQuestion || claudeResponse) {
+            notification.metadata = {
+                userQuestion: userQuestion || 'Recent command',
+                claudeResponse: claudeResponse || 'Task completed',
+                tmuxSession: tmuxSession
+            };
+        }
+
         console.log(`📱 Sending ${notificationType} notification for project: ${projectName}`);
         console.log(`🖥️ Tmux session: ${tmuxSession}`);
         

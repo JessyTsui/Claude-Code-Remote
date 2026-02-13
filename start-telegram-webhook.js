@@ -17,6 +17,9 @@ if (fs.existsSync(envPath)) {
     dotenv.config({ path: envPath });
 }
 
+// Prevent nested Claude Code session detection when webhook is started from within a Claude session
+delete process.env.CLAUDECODE;
+
 const logger = new Logger('Telegram-Webhook-Server');
 
 // Load configuration
