@@ -50,6 +50,21 @@ if (process.env.LINE_ENABLED === 'true' && process.env.LINE_CHANNEL_ACCESS_TOKEN
     processes.push({ name: 'LINE', process: lineProcess });
 }
 
+// Start Slack Socket Mode if enabled
+if (process.env.SLACK_ENABLED === 'true' && process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
+    console.log('💬 Starting Slack Socket Mode server...');
+    const slackProcess = spawn('node', ['start-slack-socket.js'], {
+        stdio: ['inherit', 'inherit', 'inherit'],
+        env: process.env
+    });
+
+    slackProcess.on('exit', (code) => {
+        console.log(`💬 Slack Socket Mode server exited with code ${code}`);
+    });
+
+    processes.push({ name: 'Slack', process: slackProcess });
+}
+
 // Start Email daemon if enabled
 if (process.env.EMAIL_ENABLED === 'true' && process.env.SMTP_USER) {
     console.log('📧 Starting email daemon...');
@@ -80,6 +95,9 @@ processes.forEach(p => {
 });
 
 console.log('\n📋 Platform Command Formats:');
+if (process.env.SLACK_ENABLED === 'true') {
+    console.log('   Slack: @BotName <message> (Socket Mode)');
+}
 if (process.env.TELEGRAM_ENABLED === 'true') {
     console.log('   Telegram: /cmd TOKEN123 <command>');
 }

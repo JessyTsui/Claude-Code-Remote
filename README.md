@@ -82,7 +82,7 @@ Control [Claude Code](https://claude.ai/code) remotely via multiple messaging pl
 
 **System Requirements:**
 - Node.js >= 14.0.0
-- For default PTY mode: no tmux required (recommended for本地直接用)
+- For default PTY mode: no tmux required (recommended for local use)
 - For tmux mode: tmux + an active session with Claude Code running
 
 ### 2. Install
@@ -99,12 +99,12 @@ npm install
 npm run setup
 ```
 
-- 引导式填写 Email / Telegram / LINE 配置，生成 `.env`
-- 自动把 Claude hooks 合并进 `~/.claude/settings.json`
-- 可随时重跑更新密钥/切换渠道
-- 如需手动配置或离线编辑 `.env`，见下方“手动配置”
+- Guided setup for Email / Telegram / LINE configuration, generates `.env`
+- Automatically merges Claude hooks into `~/.claude/settings.json`
+- Can be re-run anytime to update keys or switch channels
+- For manual configuration or offline `.env` editing, see “Manual Configuration” below
 
-### 4. 手动配置（可选，跳过如果已运行 `npm run setup`）
+### 4. Manual Configuration (optional, skip if you ran `npm run setup`)
 
 #### Option A: Configure Email (Recommended for Beginners)
 
@@ -178,7 +178,7 @@ LINE_CHANNEL_SECRET=your-secret
 LINE_USER_ID=your-user-id
 ```
 
-#### Configure Claude Code Hooks（仅在跳过 `npm run setup` 时需要）
+#### Configure Claude Code Hooks (only needed if you skipped `npm run setup`)
 
 Create hooks configuration file:
 
@@ -215,18 +215,18 @@ export CLAUDE_HOOKS_CONFIG=/your/path/to/Claude-Code-Remote/claude-hooks.json
 
 > **Note**: Subagent notifications are disabled by default. To enable them, set `enableSubagentNotifications: true` in your config. See [Subagent Notifications Guide](./docs/SUBAGENT_NOTIFICATIONS.md) for details.
 
-### 5. 启动 Claude（按你的注入模式选择）
+### 5. Start Claude (choose based on your injection mode)
 
-- **默认 PTY 模式（无需 tmux）**：直接在终端运行 `claude-code --config /path/to/your/claude/settings.json`
-- **如果你选择 tmux 模式**：
+- **Default PTY mode (no tmux required)**: Run `claude-code --config /path/to/your/claude/settings.json` directly in your terminal
+- **If you chose tmux mode**:
   ```bash
   tmux new-session -d -s claude-session
   tmux attach-session -t claude-session
   claude-code --config /path/to/your/claude/settings.json
   ```
-  > Detach: Ctrl+B 然后 D
+  > Detach: Ctrl+B then D
 
-> **Note**: Interactive setup 已合并 hooks 到 `~/.claude/settings.json`。若跳过，请确保手动配置 hooks。
+> **Note**: Interactive setup has already merged hooks into `~/.claude/settings.json`. If you skipped it, make sure to configure hooks manually.
 
 ### 6. Start Services
 
@@ -308,9 +308,9 @@ Reply to notification with: Your command here
 (Token automatically extracted from conversation context)
 ```
 
-**Local fallback (no tmux)**  
-- 默认 `INJECTION_MODE=pty`：命令通过 PTY/智能粘贴注入，不依赖 tmux  
-- macOS 可自动复制/粘贴到 Claude/终端；若自动注入失败，会把命令复制到剪贴板并弹出提醒
+**Local fallback (no tmux)**
+- Default `INJECTION_MODE=pty`: commands are injected via PTY/smart paste, no tmux dependency
+- On macOS, auto copy/paste to Claude/terminal; if auto-injection fails, the command is copied to clipboard with a reminder notification
 
 ### Advanced Configuration
 

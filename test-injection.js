@@ -3,31 +3,31 @@
 const ControllerInjector = require('./src/utils/controller-injector');
 
 async function testInjection() {
-    console.log('🧪 测试命令注入功能');
+    console.log('Testing command injection');
     console.log('===================');
-    
+
     const injector = new ControllerInjector();
-    
-    console.log(`当前模式: ${injector.mode}`);
-    console.log(`默认session: ${injector.defaultSession}`);
-    
-    // 测试列出sessions
-    console.log('\n📋 可用的sessions:');
+
+    console.log(`Current mode: ${injector.mode}`);
+    console.log(`Default session: ${injector.defaultSession}`);
+
+    // List available sessions
+    console.log('\nAvailable sessions:');
     const sessions = injector.listSessions();
     sessions.forEach((session, index) => {
         console.log(`  ${index + 1}. ${session}`);
     });
-    
-    // 测试注入命令到claude-hook-test session
-    console.log('\n🔧 测试注入命令到 claude-hook-test session...');
+
+    // Test injecting command into claude-hook-test session
+    console.log('\nTesting command injection into claude-hook-test session...');
     const testCommand = 'echo "Command injection test successful at $(date)"';
-    
+
     try {
         await injector.injectCommand(testCommand, 'claude-hook-test');
-        console.log('✅ 命令注入成功！');
-        console.log(`注入的命令: ${testCommand}`);
+        console.log('Command injection successful!');
+        console.log(`Injected command: ${testCommand}`);
     } catch (error) {
-        console.log('❌ 命令注入失败:', error.message);
+        console.log('Command injection failed:', error.message);
     }
 }
 

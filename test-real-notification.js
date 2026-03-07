@@ -38,9 +38,9 @@ async function testRealNotification() {
         message: 'Real notification - Ready for command injection',
         project: 'claude-code-line',
         metadata: {
-            userQuestion: '準備進行真實測試',
-            claudeResponse: '已準備好接收新指令並注入到真實 Claude 會話中',
-            tmuxSession: realSession  // 使用真實會話名稱
+            userQuestion: 'Ready for real test',
+            claudeResponse: 'Ready to receive new commands and inject into the real Claude session',
+            tmuxSession: realSession
         }
     };
     

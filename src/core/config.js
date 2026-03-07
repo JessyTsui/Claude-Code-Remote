@@ -21,7 +21,7 @@ class ConfigManager {
 
     getDefaultConfig() {
         return {
-            language: 'zh-CN',
+            language: 'en',
             sound: {
                 completed: 'Glass',
                 waiting: 'Tink'
@@ -102,6 +102,17 @@ class ConfigManager {
                     chatId: process.env.TELEGRAM_CHAT_ID || '',
                     groupId: process.env.TELEGRAM_GROUP_ID || '',
                     forceIPv4: process.env.TELEGRAM_FORCE_IPV4 === 'true'
+                }
+            },
+            slack: {
+                type: 'chat',
+                enabled: process.env.SLACK_ENABLED === 'true',
+                config: {
+                    botToken: process.env.SLACK_BOT_TOKEN || '',
+                    appToken: process.env.SLACK_APP_TOKEN || '',
+                    channelId: process.env.SLACK_CHANNEL_ID || '',
+                    repoPath: process.env.SLACK_REPO_PATH || '',
+                    claudeCommand: process.env.SLACK_CLAUDE_COMMAND || 'claude --dangerously-skip-permissions'
                 }
             }
         };

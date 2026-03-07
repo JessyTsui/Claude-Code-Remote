@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * Smart Monitor - 智能監控器，能檢測歷史回應和新回應
- * 解決監控器錯過已完成回應的問題
+ * Smart Monitor - Detects historical and new responses
+ * Solves the issue of monitor missing completed responses
  */
 
 const path = require('path');
@@ -22,7 +22,7 @@ class SmartMonitor {
     constructor() {
         this.sessionName = process.env.TMUX_SESSION || 'claude-real';
         this.lastOutput = '';
-        this.processedResponses = new Set(); // 記錄已處理的回應
+        this.processedResponses = new Set(); // Track processed responses
         this.checkInterval = 1000; // Check every 1 second
         this.isRunning = false;
         this.startupTime = Date.now();

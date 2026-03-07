@@ -66,8 +66,15 @@ class Notifier {
             this.registerChannel('telegram', telegram);
         }
 
-        // ✅ Telegram integration completed
-        // TODO: Future channels - Discord, Slack, Teams, etc.
+        // Load Slack channel
+        const SlackChannel = require('../channels/slack/slack');
+        const slackConfig = this.config.getChannel('slack');
+        if (slackConfig && slackConfig.enabled) {
+            const slack = new SlackChannel(slackConfig.config || {});
+            this.registerChannel('slack', slack);
+        }
+
+        // TODO: Future channels - Discord, Teams, etc.
 
         this.logger.info(`Initialized ${this.channels.size} channels`);
     }
@@ -127,7 +134,7 @@ class Notifier {
      */
     _buildNotification(type, metadata = {}) {
         const project = metadata.project || this.config.getProjectName();
-        const lang = this.config.get('language', 'zh-CN');
+        const lang = this.config.get('language', 'en');
         const content = this._getNotificationContent(type, lang);
 
         // Replace project placeholder
@@ -170,16 +177,6 @@ class Notifier {
      */
     _loadI18n() {
         this.i18n = {
-            'zh-CN': {
-                completed: {
-                    title: 'Claude Code - Task Completed',
-                    message: '[{project}] Task completed, Claude is waiting for next instruction'
-                },
-                waiting: {
-                    title: 'Claude Code - Waiting for Input',
-                    message: '[{project}] Claude needs your further guidance'
-                }
-            },
             'en': {
                 completed: {
                     title: 'Claude Code - Task Completed',
@@ -188,16 +185,6 @@ class Notifier {
                 waiting: {
                     title: 'Claude Code - Waiting for Input',
                     message: '[{project}] Claude needs your further guidance'
-                }
-            },
-            'ja': {
-                completed: {
-                    title: 'Claude Code - タスク完了',
-                    message: '[{project}] タスクが完了しました。Claudeが次の指示を待っています'
-                },
-                waiting: {
-                    title: 'Claude Code - 入力待ち',
-                    message: '[{project}] Claudeにはあなたのさらなるガイダンスが必要です'
                 }
             }
         };

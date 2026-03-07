@@ -262,8 +262,7 @@ async function main() {
     
     // Language selection first
     const langChoice = await askSelect(bold(`${icons.globe} ${i18nData.en.selectLanguage}`), [
-        { label: 'English', value: 'en' },
-        { label: '中文', value: 'zh' }
+        { label: 'English', value: 'en' }
     ], 0);
     lang = langChoice.value;
     i18n = i18nData[lang];
@@ -275,7 +274,7 @@ async function main() {
     const existingEnv = loadExistingEnv();
 
     // Basic Configuration
-    printSection(lang === 'en' ? 'Basic Configuration' : '基本配置', icons.gear);
+    printSection('Basic Configuration', icons.gear);
     
     const sessionMapPath = await ask(i18n.sessionMapPath, existingEnv.SESSION_MAP_PATH || defaultSessionMap);
     let injectionMode = (await ask(i18n.injectionMode, existingEnv.INJECTION_MODE || 'pty')).toLowerCase();
@@ -459,7 +458,7 @@ async function main() {
         LOG_LEVEL: logLevel
     };
 
-    printSection(lang === 'en' ? 'Saving Configuration' : '保存配置', icons.star);
+    printSection('Saving Configuration', icons.star);
     const savedEnvPath = writeEnvFile(envValues, existingEnv);
     console.log('\n' + success(`${i18n.envSaved} ${savedEnvPath}`));
 
