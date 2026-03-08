@@ -562,7 +562,7 @@ live tmux sessions (dead entries removed, alert reactions swapped for dead alert
 | `ALERT_SKILL`               | No       | Claude skill/prompt for alert investigation (e.g. `one:pay-ops-production`)         |
 | `PAGERDUTY_API_TOKEN`       | No       | PagerDuty API token for auto-acknowledge                                            |
 | `PAGERDUTY_FROM_EMAIL`      | No       | PagerDuty "From" email for API calls                                                |
-| `ALERT_FEEDBACK_TIMEOUT_MS` | No       | Feedback timer duration (default: 300000 = 5 min)                                   |
+| `SESSION_INACTIVITY_TIMEOUT_MS` | No   | Inactivity timeout for all sessions (default: 300000 = 5 min)                       |
 | **System**                  |          |                                                                                     |
 | `INJECTION_MODE`            | No       | `tmux` (only supported mode)                                                        |
 | `LOG_LEVEL`                 | No       | `debug`/`info`/`warn`/`error`                                                       |

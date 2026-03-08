@@ -22,6 +22,7 @@ class SlackSocketHandler {
 
         // Polling state per session (in-memory only, rebuilt on start)
         this.pollers = new Map();
+        this.sessionTimers = new Map(); // sessionKey -> setTimeout handle
 
         this.app = new App({
             token: config.botToken,
@@ -167,7 +168,8 @@ class SlackSocketHandler {
         for (const s of sessions) {
             if (this._isTmuxSessionAlive(s.sessionName)) {
                 alive++;
-                this.logger.info(`Recovered session: ${s.sessionName} (channel ${s.channelId})`);
+                this._startSessionTimeout(s.sessionKey);
+                this.logger.info(`Recovered session: ${s.sessionName} (channel ${s.channelId}) — timeout set`);
             } else {
                 // Swap alert reactions for dead alert sessions
                 const row = this._stmts.get.get(s.sessionKey);
@@ -177,6 +179,7 @@ class SlackSocketHandler {
                     this.logger.info(`Alert session ${s.sessionName} dead — swapped reactions`);
                 }
                 this._deleteSession(s.sessionKey);
+                this._clearSessionTimeout(s.sessionKey);
                 removed++;
             }
         }
@@ -600,6 +603,7 @@ class SlackSocketHandler {
             if (session && this._isTmuxSessionAlive(session.sessionName)) {
                 // Existing session — fetch only messages since last bot response
                 this._touchSession(sessionKey);
+                this._startSessionTimeout(sessionKey);
 
                 if (session.lastBotTs) {
                     const newMessages = await this._fetchThreadMessages(channelId, threadTs, session.lastBotTs);
@@ -722,6 +726,7 @@ class SlackSocketHandler {
             if (command === '/exit') {
                 await this._injectCommand(session.sessionName, command);
                 this._deleteSession(sessionKey);
+                this._clearSessionTimeout(sessionKey);
                 const pollKey = session.sessionName;
                 if (this.pollers.has(pollKey)) {
                     clearInterval(this.pollers.get(pollKey).interval);
@@ -954,6 +959,7 @@ class SlackSocketHandler {
                             if (sessionKey) {
                                 const nowTs = String(Date.now() / 1000);
                                 this._updateLastBotTs(sessionKey, nowTs);
+                                this._startSessionTimeout(sessionKey);
                             }
                         } catch (err) {
                             this.logger.error(`Failed to send response to Slack: ${err.message}`);
@@ -980,6 +986,54 @@ class SlackSocketHandler {
         }, 1000);
 
         this.pollers.set(pollKey, { interval, session });
+    }
+
+    _startSessionTimeout(sessionKey) {
+        // Clear any existing timer
+        if (this.sessionTimers.has(sessionKey)) {
+            clearTimeout(this.sessionTimers.get(sessionKey));
+        }
+
+        const timeoutMs = this.config.sessionInactivityTimeoutMs || 300000;
+        const timer = setTimeout(async () => {
+            const session = this._getSession(sessionKey);
+            if (!session) {
+                this.sessionTimers.delete(sessionKey);
+                return;
+            }
+
+            const minutes = Math.round(timeoutMs / 60000);
+            this.logger.info(`Session ${session.sessionName} timed out after ${minutes}min of inactivity`);
+
+            // Kill tmux session
+            try {
+                execSync(`tmux kill-session -t ${session.sessionName} 2>/dev/null`);
+            } catch (_) { /* already dead */ }
+
+            // Stop poller
+            if (this.pollers.has(session.sessionName)) {
+                clearInterval(this.pollers.get(session.sessionName).interval);
+                this.pollers.delete(session.sessionName);
+            }
+
+            // Alert sessions only: swap 👀 → ✅
+            if (session.alertMessageTs) {
+                await this._removeReaction(session.channelId, session.alertMessageTs, 'eyes');
+                await this._addReaction(session.channelId, session.alertMessageTs, 'white_check_mark');
+            }
+
+            this._deleteSession(sessionKey);
+            this.sessionTimers.delete(sessionKey);
+        }, timeoutMs);
+
+        this.sessionTimers.set(sessionKey, timer);
+    }
+
+    _clearSessionTimeout(sessionKey) {
+        if (this.sessionTimers.has(sessionKey)) {
+            clearTimeout(this.sessionTimers.get(sessionKey));
+            this.sessionTimers.delete(sessionKey);
+        }
     }
 
     _extractResponse(baselineOutput, currentOutput) {
@@ -1499,6 +1553,11 @@ class SlackSocketHandler {
             clearInterval(poller.interval);
         }
         this.pollers.clear();
+
+        for (const [, timer] of this.sessionTimers) {
+            clearTimeout(timer);
+        }
+        this.sessionTimers.clear();
 
         // NOTE: We do NOT kill tmux sessions on stop.
         // They persist so conversations can resume after restart.

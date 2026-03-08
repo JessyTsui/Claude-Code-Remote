@@ -133,7 +133,7 @@ MONITOR_CHANNELS=payments-alerts,incidents
 ALERT_SKILL=one:pay-ops-production
 PAGERDUTY_API_TOKEN=your-token
 PAGERDUTY_FROM_EMAIL=your-email@company.com
-ALERT_FEEDBACK_TIMEOUT_MS=300000
+SESSION_INACTIVITY_TIMEOUT_MS=300000
 ```
 
 When a PagerDuty alert appears in a monitored channel:

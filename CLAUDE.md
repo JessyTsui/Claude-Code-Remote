@@ -78,7 +78,8 @@ All state is file-based:
 
 Environment variables in `.env` (see `.env.example`):
 - **Slack**: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_CHANNEL_ID`, `SLACK_REPO_PATH`, `SLACK_REPO_ROOT`, `SLACK_CLAUDE_COMMAND`, `SLACK_WHITELIST`, `SLACK_HTTP_PORT`
-- **Alert Monitoring**: `MONITOR_CHANNELS`, `ALERT_SKILL`, `PAGERDUTY_API_TOKEN`, `PAGERDUTY_FROM_EMAIL`, `ALERT_FEEDBACK_TIMEOUT_MS`
+- **Alert Monitoring**: `MONITOR_CHANNELS`, `ALERT_SKILL`, `PAGERDUTY_API_TOKEN`, `PAGERDUTY_FROM_EMAIL`
+- **Session**: `SESSION_INACTIVITY_TIMEOUT_MS`
 - **System**: `INJECTION_MODE` (tmux), `SESSION_MAP_PATH`, `LOG_LEVEL`, `DAILY_RESTART_HOUR`
 
 Config file hierarchy: `config/default.json` -> `config/user.json` -> env vars (deep merge with env overrides).

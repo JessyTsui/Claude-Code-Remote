@@ -33,7 +33,7 @@ const config = {
     // Alert monitoring
     monitorChannels: process.env.MONITOR_CHANNELS || '',
     alertSkill: process.env.ALERT_SKILL || '',
-    alertFeedbackTimeoutMs: parseInt(process.env.ALERT_FEEDBACK_TIMEOUT_MS) || 300000,
+    sessionInactivityTimeoutMs: parseInt(process.env.SESSION_INACTIVITY_TIMEOUT_MS) || 300000,
     pagerdutyApiToken: process.env.PAGERDUTY_API_TOKEN || '',
     pagerdutyFromEmail: process.env.PAGERDUTY_FROM_EMAIL || ''
 };
@@ -95,7 +95,7 @@ async function start() {
     logger.info(`- Monitor Channels: ${config.monitorChannels || 'None'}`);
     logger.info(`- Alert Skill: ${config.alertSkill || 'None'}`);
     logger.info(`- PagerDuty: ${config.pagerdutyApiToken ? 'Configured' : 'Not configured'}`);
-    logger.info(`- Alert Feedback Timeout: ${config.alertFeedbackTimeoutMs}ms`);
+    logger.info(`- Session Inactivity Timeout: ${config.sessionInactivityTimeoutMs}ms`);
 
     await handler.start();
     logger.info('Slack Socket Mode is running. Listening for messages...');
