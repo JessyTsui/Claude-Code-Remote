@@ -45,6 +45,10 @@ Plugin architecture with a base class at `src/channels/base/channel.js`. Only Sl
 - `slack/socket.js` — Slack Socket Mode handler (manages Claude tmux sessions, relays responses, alert monitoring)
 - `slack/alert-monitor.js` — Detects PagerDuty messages in monitored Slack channels
 
+### Services (`src/services/`)
+
+- **`daily-summary.js`** — Daily channel summary service. Fetches 24h of messages via personal Slack tokens (xoxc/xoxd), formats them, summarizes via Claude Agent SDK, and delivers via DM or channel post. Supports message splitting for long summaries.
+
 ### Relay System (`src/relay/`)
 
 - **`tmux-injector.js`** — Injects commands into tmux sessions
@@ -74,11 +78,20 @@ All state is file-based:
 5. From here, identical to regular flow: tmux session, polling, output posting
 6. On `/exit` or session cleanup, swaps 👀 → ✅ on the alert message
 
+### Execution Flow (Daily Summary)
+
+1. Scheduled via `setTimeout` at `DAILY_SUMMARY_TIME`, or triggered manually via `POST /daily-summary`
+2. For each channel in `DAILY_SUMMARY_CHANNELS`: fetches 24h of messages using xoxc/xoxd tokens
+3. Resolves user display names, formats timestamps to GMT+7, filters system messages
+4. Passes formatted messages to Claude Agent SDK for summarization (single turn, no tools needed)
+5. DMs combined summary to owner or posts to `SLACK_CHANNEL_ID`, splitting long messages into thread replies
+
 ## Configuration
 
 Environment variables in `.env` (see `.env.example`):
 - **Slack**: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_CHANNEL_ID`, `SLACK_REPO_PATH`, `SLACK_REPO_ROOT`, `SLACK_CLAUDE_COMMAND`, `SLACK_WHITELIST`, `SLACK_HTTP_PORT`
 - **Alert Monitoring**: `MONITOR_CHANNELS`, `ALERT_SKILL`, `PAGERDUTY_API_TOKEN`, `PAGERDUTY_FROM_EMAIL`
+- **Daily Summary**: `DAILY_SUMMARY_CHANNELS`, `DAILY_SUMMARY_TIME`, `DAILY_SUMMARY_MODEL`, `SLACK_XOXC_TOKEN`, `SLACK_XOXD_TOKEN`
 - **Session**: `SESSION_INACTIVITY_TIMEOUT_MS`
 - **System**: `INJECTION_MODE` (tmux), `SESSION_MAP_PATH`, `LOG_LEVEL`, `DAILY_RESTART_HOUR`
 
@@ -86,4 +99,4 @@ Config file hierarchy: `config/default.json` -> `config/user.json` -> env vars (
 
 ## Tech Stack
 
-Node.js (>=14.0.0), `@slack/bolt` (Socket Mode + Web API), `better-sqlite3` (session persistence), Express (HTTP health/API), Pino (logging), dotenv (config), `swagger-ui-express` (API docs). No TypeScript, no bundler, no test framework.
+Node.js (>=14.0.0), `@slack/bolt` (Socket Mode + Web API), `better-sqlite3` (session persistence), `@anthropic-ai/claude-agent-sdk` (daily summaries), Express (HTTP health/API), Pino (logging), dotenv (config), `swagger-ui-express` (API docs). No TypeScript, no bundler, no test framework.

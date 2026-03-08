@@ -8,6 +8,7 @@ Control [Claude Code](https://claude.ai/code) remotely via Slack. Start tasks lo
 - **Tmux session management** — Each Slack thread gets its own tmux session with Claude running
 - **Hook-based notifications** — Claude Code Stop/SubagentStop hooks post to the correct Slack thread automatically
 - **PagerDuty alert monitoring** — Watch Slack channels for PD alerts, auto-start Claude investigation sessions
+- **Daily channel summaries** — AI-powered daily digests of Slack channel activity, delivered via DM or channel
 - **Session persistence** — SQLite-backed sessions survive bot restarts; dead sessions auto-reconcile on startup
 - **HTTP API** — Health check, Swagger docs, and management endpoints at `localhost:9999`
 - **Image support** — Attach images to Slack messages and they're passed to Claude
@@ -142,6 +143,31 @@ When a PagerDuty alert appears in a monitored channel:
 3. Posts investigation results back to the alert thread
 4. On `/exit` or cleanup, swaps eyes to checkmark
 
+### Daily Channel Summaries (optional)
+
+Generate AI-powered daily summaries of Slack channel activity:
+
+```env
+# Channels to summarize (format: name:ID,name:ID)
+DAILY_SUMMARY_CHANNELS=general:C012345,engineering:C067890
+
+# Time to run (HH:MM format, local time, default: 07:00)
+DAILY_SUMMARY_TIME=07:00
+
+# Claude model (sonnet, opus, haiku — default: sonnet)
+DAILY_SUMMARY_MODEL=sonnet
+
+# Required: personal Slack tokens for reading channel history
+SLACK_XOXC_TOKEN=xoxc-...
+SLACK_XOXD_TOKEN=xoxd-...
+```
+
+At the scheduled time (or via `POST /daily-summary`):
+1. Fetches last 24h of messages using personal Slack credentials
+2. Resolves usernames and formats timestamps (GMT+7)
+3. Summarizes via Claude Agent SDK — key discussions, decisions, action items, shared links
+4. DMs the summary to the owner (or posts to `SLACK_CHANNEL_ID`)
+
 ## Architecture
 
 See [`docs/architecture.md`](./docs/architecture.md) for detailed data flow diagrams, class references, and the full file map.
@@ -156,6 +182,7 @@ See [`docs/architecture.md`](./docs/architecture.md) for detailed data flow diag
 | `setup.js` | Interactive setup wizard |
 | `src/channels/slack/socket.js` | Main runtime — manages sessions, polling, alerts |
 | `src/channels/slack/alert-monitor.js` | PagerDuty detection in monitored channels |
+| `src/services/daily-summary.js` | Daily channel summary generation |
 | `src/relay/tmux-injector.js` | tmux command injection |
 | `src/data/slack-sessions.db` | SQLite session persistence |
 

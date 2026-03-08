@@ -10,6 +10,7 @@ const fs = require('fs');
 const dotenv = require('dotenv');
 const Logger = require('./src/core/logger');
 const SlackSocketHandler = require('./src/channels/slack/socket');
+const { runDailySummary, parseChannelsConfig } = require('./src/services/daily-summary');
 
 // Load environment variables
 const envPath = path.join(__dirname, '.env');
@@ -35,7 +36,13 @@ const config = {
     alertSkill: process.env.ALERT_SKILL || '',
     sessionInactivityTimeoutMs: parseInt(process.env.SESSION_INACTIVITY_TIMEOUT_MS) || 300000,
     pagerdutyApiToken: process.env.PAGERDUTY_API_TOKEN || '',
-    pagerdutyFromEmail: process.env.PAGERDUTY_FROM_EMAIL || ''
+    pagerdutyFromEmail: process.env.PAGERDUTY_FROM_EMAIL || '',
+    // Daily summary
+    dailySummaryChannels: process.env.DAILY_SUMMARY_CHANNELS || '',
+    dailySummaryTime: process.env.DAILY_SUMMARY_TIME || '07:00',
+    dailySummaryModel: process.env.DAILY_SUMMARY_MODEL || 'sonnet',
+    xoxcToken: process.env.SLACK_XOXC_TOKEN || '',
+    xoxdToken: process.env.SLACK_XOXD_TOKEN || '',
 };
 
 // Validate configuration
@@ -68,16 +75,69 @@ function scheduleDailyRestart(hour) {
         logger.info(`Daily restart scheduled at ${hour}:00 (in ${hours}h)`);
         setTimeout(async () => {
             logger.info('Daily restart triggered — restarting Bolt app...');
-            try {
-                await handler.stop();
-                await handler.start();
-                logger.info('Daily restart completed successfully');
-            } catch (err) {
-                logger.error(`Daily restart failed: ${err.message} — exiting process`);
-                process.exit(1);
+            const MAX_RETRIES = 3;
+            const RETRY_DELAY_MS = 5000;
+
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                    await handler.stop();
+                    await handler.start();
+                    logger.info('Daily restart completed successfully');
+                    break;
+                } catch (err) {
+                    logger.error(`Daily restart attempt ${attempt}/${MAX_RETRIES} failed: ${err.message}`);
+                    if (attempt === MAX_RETRIES) {
+                        logger.error('All restart attempts failed — exiting process');
+                        process.exit(1);
+                    }
+                    logger.info(`Retrying in ${RETRY_DELAY_MS / 1000}s...`);
+                    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+                }
             }
             scheduleNext();
         }, ms);
+    }
+
+    scheduleNext();
+}
+
+function scheduleDailySummary(time) {
+    const channels = parseChannelsConfig(config.dailySummaryChannels);
+    if (channels.length === 0) return;
+
+    const [hh, mm] = time.split(':').map(Number);
+
+    function msUntilNextOccurrence() {
+        const now = new Date();
+        const target = new Date(now);
+        target.setHours(hh, mm, 0, 0);
+        if (target <= now) {
+            target.setDate(target.getDate() + 1);
+        }
+        return target - now;
+    }
+
+    function scheduleNext() {
+        const ms = msUntilNextOccurrence();
+        const hours = (ms / 3600000).toFixed(1);
+        logger.info(`Daily summary scheduled at ${time} (in ${hours}h) for: ${channels.map(c => c.name).join(', ')}`);
+        setTimeout(async () => {
+            logger.info('Daily summary triggered');
+            try {
+                await runDailySummary({
+                    channels,
+                    ownerUserId: config.ownerUserId,
+                    model: config.dailySummaryModel,
+                    xoxcToken: config.xoxcToken,
+                    xoxdToken: config.xoxdToken,
+                    slackClient: handler.app.client,
+                    deliveryChannelId: config.channelId,
+                });
+            } catch (err) {
+                logger.error(`Daily summary failed: ${err.message}`);
+            }
+            scheduleNext();
+        }, ms).unref();
     }
 
     scheduleNext();
@@ -96,6 +156,7 @@ async function start() {
     logger.info(`- Alert Skill: ${config.alertSkill || 'None'}`);
     logger.info(`- PagerDuty: ${config.pagerdutyApiToken ? 'Configured' : 'Not configured'}`);
     logger.info(`- Session Inactivity Timeout: ${config.sessionInactivityTimeoutMs}ms`);
+    logger.info(`- Daily Summary: ${config.dailySummaryChannels ? `${config.dailySummaryTime} → ${config.dailySummaryChannels}` : 'Not configured'}`);
 
     await handler.start();
     logger.info('Slack Socket Mode is running. Listening for messages...');
@@ -104,6 +165,11 @@ async function start() {
     const restartHour = parseInt(process.env.DAILY_RESTART_HOUR);
     if (!isNaN(restartHour) && restartHour >= 0 && restartHour <= 23) {
         scheduleDailyRestart(restartHour);
+    }
+
+    // Schedule daily summary if configured
+    if (config.dailySummaryChannels) {
+        scheduleDailySummary(config.dailySummaryTime);
     }
 }
 

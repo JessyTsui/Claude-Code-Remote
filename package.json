@@ -32,6 +32,7 @@
   },
   "homepage": "https://github.com/Claude-Code-Remote/Claude-Code-Remote#readme",
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.71",
     "@slack/bolt": "^4.6.0",
     "axios": "^1.6.0",
     "better-sqlite3": "^12.6.2",

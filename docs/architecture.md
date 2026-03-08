@@ -81,6 +81,9 @@ User (Slack)                       Server                          Terminal
 |   |   |-- subagent-tracker.js    # SubagentTracker: track subagent activities
 |   |   `-- controller-injector.js # ControllerInjector: tmux/pty command injection
 |   |
+|   |-- services/
+|   |   `-- daily-summary.js       # DailySummary: fetch channel msgs + Claude Agent SDK summarization
+|   |
 |   `-- data/
 |       |-- slack-sessions.db      # SQLite: sessions table (with alert_message_ts for alert sessions)
 |       `-- session-map.json       # JSON: token -> execution context mapping
@@ -202,7 +205,7 @@ SlackSocketHandler
 | `_stopPolling(key)`                                     | Clear interval                                                                                                                              |
 | `_captureTmuxOutput(sessionName)`                       | `tmux capture-pane -p -S -500`                                                                                                              |
 | **HTTP server**                                         |                                                                                                                                             |
-| `_setupHttpServer()`                                    | Routes: `/` health, `/docs` swagger, `/send-command`, `/exit-session`, `/remove-reaction`, `/trigger-alert`, `/sessions`, `/delete-message` |
+| `_setupHttpServer()`                                    | Routes: `/` health, `/docs` swagger, `/send-command`, `/exit-session`, `/remove-reaction`, `/trigger-alert`, `/sessions`, `/delete-message`, `/daily-summary` |
 | **Connection monitoring**                               |                                                                                                                                             |
 | `_setupConnectionMonitor()`                             | Watchdog: detect disconnect, auto-reconnect                                                                                                 |
 | **Utilities**                                           |                                                                                                                                             |
@@ -236,6 +239,24 @@ Additional methods on `SlackSocketHandler` for alert support:
 | `_removeReaction(channelId, messageTs, name)` | Remove emoji reaction (handles `no_reaction`)                   |
 | `_acknowledgePagerDuty(incidentId)`          | Check PD incident status + auto-acknowledge via REST API         |
 | `_getPermalink(channelId, messageTs)`        | Get Slack message permalink for building alert prompts           |
+
+---
+
+### Services Layer
+
+#### `DailySummary` (`src/services/daily-summary.js`)
+
+Generates AI-powered daily summaries of Slack channel activity. Fetches messages via personal Slack tokens, formats them, and uses Claude Agent SDK for summarization.
+
+| Function                                            | Description                                                              |
+|-----------------------------------------------------|--------------------------------------------------------------------------|
+| `runDailySummary(options)`                          | Main entry: iterate channels, fetch, format, summarize, deliver          |
+| `fetchChannelMessages(channelId, xoxcToken, xoxdToken)` | Fetch 24h of messages via Slack `conversations.history` (xoxc/xoxd) |
+| `resolveUsers(messages, xoxcToken, xoxdToken)`      | Resolve user IDs to display names via `users.info`                       |
+| `formatMessages(messages, userCache)`               | Filter system subtypes, format as `[HH:MM] user: text` (GMT+7)          |
+| `summarizeWithClaude(channelName, formattedMessages, model)` | Single-turn Claude Agent SDK call with pre-fetched messages     |
+| `createSendDm(slackClient)`                         | Returns DM sender that splits long messages into thread replies          |
+| `parseChannelsConfig(configStr)`                    | Parse `name:ID,name:ID` format from env var                             |
 
 ---
 
@@ -356,7 +377,8 @@ Server launcher:
 2. Validate `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`
 3. Create `SlackSocketHandler` and call `start()`
 4. Schedule daily restart if `DAILY_RESTART_HOUR` set
-5. Handle SIGINT/SIGTERM for graceful shutdown
+5. Schedule daily summary if `DAILY_SUMMARY_CHANNELS` set
+6. Handle SIGINT/SIGTERM for graceful shutdown
 
 #### `claude-remote.js` (CLI)
 
@@ -467,7 +489,33 @@ Regular polling + response posting
     |-- On restart, if tmux dead → reconcile swaps 👀→✅
 ```
 
-### 4. Configuration Merge Order
+### 4. Daily Summary Flow
+
+```
+Scheduled timer fires (DAILY_SUMMARY_TIME) or POST /daily-summary
+    |
+    v
+runDailySummary()
+    |-- For each channel in DAILY_SUMMARY_CHANNELS:
+    |   |
+    |   |-- fetchChannelMessages(channelId, xoxcToken, xoxdToken)
+    |   |   `-- Slack API: conversations.history (last 24h, paginated)
+    |   |
+    |   |-- resolveUsers() → display name cache
+    |   |-- formatMessages() → "[HH:MM] user: text" (GMT+7, filtered)
+    |   |
+    |   |-- summarizeWithClaude(channelName, formattedMessages, model)
+    |   |   `-- Claude Agent SDK: query() with maxTurns=1
+    |   |
+    |   `-- sendDm(target, summaryText)
+    |       |-- If <= 3900 chars: single message
+    |       `-- If > 3900 chars: split at paragraph boundaries, thread replies
+    |
+    v
+Summary delivered to SLACK_OWNER_USER_ID or SLACK_CHANNEL_ID
+```
+
+### 5. Configuration Merge Order
 
 ```
 Hardcoded defaults (getDefaultConfig)
@@ -491,16 +539,21 @@ Final runtime config
 
 ```
 start-slack-socket.js
-  `-- SlackSocketHandler (socket.js)
-        |-- @slack/bolt (App)
-        |-- better-sqlite3 (Database)
-        |-- express (HTTP API)
-        |-- swagger-ui-express
-        |-- axios (image download)
-        |-- Logger
-        |-- tmux-helper.js (buildTmuxCommand)
-        `-- AlertMonitor (alert-monitor.js)
-            `-- Logger
+  |-- SlackSocketHandler (socket.js)
+  |     |-- @slack/bolt (App)
+  |     |-- better-sqlite3 (Database)
+  |     |-- express (HTTP API)
+  |     |-- swagger-ui-express
+  |     |-- axios (image download)
+  |     |-- Logger
+  |     |-- tmux-helper.js (buildTmuxCommand)
+  |     |-- DailySummary (daily-summary.js)
+  |     `-- AlertMonitor (alert-monitor.js)
+  |         `-- Logger
+  `-- DailySummary (daily-summary.js)
+        |-- @anthropic-ai/claude-agent-sdk (query)
+        |-- axios (Slack API calls)
+        `-- Logger
 
 claude-hook-notify.js
   |-- @slack/web-api (WebClient)
@@ -563,6 +616,12 @@ live tmux sessions (dead entries removed, alert reactions swapped for dead alert
 | `PAGERDUTY_API_TOKEN`       | No       | PagerDuty API token for auto-acknowledge                                            |
 | `PAGERDUTY_FROM_EMAIL`      | No       | PagerDuty "From" email for API calls                                                |
 | `SESSION_INACTIVITY_TIMEOUT_MS` | No   | Inactivity timeout for all sessions (default: 300000 = 5 min)                       |
+| **Daily Summary**           |          |                                                                                     |
+| `DAILY_SUMMARY_CHANNELS`   | No       | Channels to summarize (format: `name:ID,name:ID`)                                   |
+| `DAILY_SUMMARY_TIME`       | No       | Time to run (HH:MM, local time, default: `07:00`)                                   |
+| `DAILY_SUMMARY_MODEL`      | No       | Claude model for summarization (`sonnet`/`opus`/`haiku`, default: `sonnet`)          |
+| `SLACK_XOXC_TOKEN`         | No       | Personal Slack token (xoxc-...) for reading channel history                          |
+| `SLACK_XOXD_TOKEN`         | No       | Personal Slack cookie token (xoxd-...) for reading channel history                   |
 | **System**                  |          |                                                                                     |
 | `INJECTION_MODE`            | No       | `tmux` (only supported mode)                                                        |
 | `LOG_LEVEL`                 | No       | `debug`/`info`/`warn`/`error`                                                       |

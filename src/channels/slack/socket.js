@@ -14,6 +14,7 @@ const fs = require('fs');
 const axios = require('axios');
 const Logger = require('../../core/logger');
 const AlertMonitor = require('./alert-monitor');
+const { runDailySummary, parseChannelsConfig } = require('../../services/daily-summary');
 
 class SlackSocketHandler {
     constructor(config = {}) {
@@ -1322,6 +1323,16 @@ class SlackSocketHandler {
                             }
                         }
                     }
+                },
+                '/daily-summary': {
+                    post: {
+                        summary: 'Manually trigger daily channel summary',
+                        responses: {
+                            '200': { description: 'Summary triggered', content: { 'application/json': { schema: { type: 'object', properties: { status: { type: 'string' }, channels: { type: 'number' } } } } } },
+                            '400': { description: 'No channels configured' },
+                            '500': { description: 'Failed to run summary' }
+                        }
+                    }
                 }
             }
         };
@@ -1498,6 +1509,27 @@ class SlackSocketHandler {
             res.json({ sessions });
         });
 
+        // ─── Daily Summary ────────────────────────────────────
+        httpApp.post('/daily-summary', async (req, res) => {
+            const channels = parseChannelsConfig(this.config.dailySummaryChannels);
+            if (channels.length === 0) {
+                return res.status(400).json({ error: 'No DAILY_SUMMARY_CHANNELS configured' });
+            }
+
+            res.json({ status: 'triggered', channels: channels.length });
+
+            // Run async (don't block the HTTP response)
+            runDailySummary({
+                channels,
+                ownerUserId: this.config.ownerUserId,
+                model: this.config.dailySummaryModel || 'sonnet',
+                xoxcToken: this.config.xoxcToken,
+                xoxdToken: this.config.xoxdToken,
+                slackClient: this.app.client,
+                deliveryChannelId: this.config.channelId,
+            }).catch(err => this.logger.error(`Daily summary error: ${err.message}`));
+        });
+
         this._httpApp = httpApp;
     }
 
@@ -1520,6 +1552,11 @@ class SlackSocketHandler {
 
     async start() {
         const t0 = Date.now();
+
+        // Re-initialize DB if it was closed (e.g. after stop() during daily restart)
+        if (!this.db || !this.db.open) {
+            this._initDb();
+        }
 
         // Reconcile DB sessions with live tmux sessions
         await this._reconcileSessions();
@@ -1546,7 +1583,8 @@ class SlackSocketHandler {
         this._clearReconnectTimer();
 
         if (this.httpServer) {
-            this.httpServer.close();
+            await new Promise(resolve => this.httpServer.close(resolve));
+            this.httpServer = null;
         }
 
         for (const [key, poller] of this.pollers) {
