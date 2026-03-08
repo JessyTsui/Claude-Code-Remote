@@ -485,12 +485,12 @@ class SlackSocketHandler {
             }
         }
 
-        await this._processCommand(channelId, threadTs, text, say);
+        await this._processCommand(channelId, threadTs, text, say, event.ts);
     }
 
     // ─── Command Processing ──────────────────────────────────────────
 
-    async _processCommand(channelId, threadTs, command, say) {
+    async _processCommand(channelId, threadTs, command, say, messageTs) {
         const sessionKey = `${channelId}-${threadTs}`;
         let session = this._getSession(sessionKey);
         let threadContext = null; // Will hold formatted thread messages to prepend
@@ -620,7 +620,7 @@ class SlackSocketHandler {
                 }
                 await this.app.client.reactions.add({
                     channel: channelId,
-                    timestamp: event.ts,
+                    timestamp: messageTs,
                     name: 'white_check_mark',
                 });
                 return;
