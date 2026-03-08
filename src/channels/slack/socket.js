@@ -1108,6 +1108,51 @@ class SlackSocketHandler {
             }
         });
 
+        httpApp.post('/remove-reaction', async (req, res) => {
+            const { url } = req.body;
+            if (!url) {
+                return res.status(400).json({ error: 'url is required' });
+            }
+
+            const parsed = this._parseSlackUrl(url);
+            if (!parsed) {
+                return res.status(400).json({ error: 'Invalid Slack message URL' });
+            }
+
+            try {
+                const { WebClient } = require('@slack/web-api');
+                const web = new WebClient(this.config.botToken);
+
+                // Fetch reactions on the message
+                const result = await web.reactions.get({
+                    channel: parsed.channel,
+                    timestamp: parsed.ts,
+                    full: true
+                });
+
+                const botUserId = (await web.auth.test()).user_id;
+                const reactions = result.message?.reactions || [];
+                const botReactions = reactions.filter(r => r.users?.includes(botUserId));
+
+                // Remove all reactions added by the bot
+                const removed = [];
+                for (const reaction of botReactions) {
+                    await web.reactions.remove({
+                        channel: parsed.channel,
+                        timestamp: parsed.ts,
+                        name: reaction.name
+                    });
+                    removed.push(reaction.name);
+                }
+
+                this.logger.info(`Removed ${removed.length} reaction(s) from channel=${parsed.channel} ts=${parsed.ts}: ${removed.join(', ')}`);
+                res.json({ ok: true, channel: parsed.channel, ts: parsed.ts, removed });
+            } catch (error) {
+                this.logger.error('Failed to remove reaction:', error.message);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
         // ─── Trigger Alert ─────────────────────────────────────
         httpApp.post('/trigger-alert', async (req, res) => {
             if (!this.app) {
