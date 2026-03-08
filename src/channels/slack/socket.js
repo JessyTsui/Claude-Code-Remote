@@ -451,12 +451,9 @@ class SlackSocketHandler {
                     command = 'hi';
                 }
 
-                // Pass --cwd so Claude CLI knows its working directory
-                const fullClaudeCmd = `${claudeCmd} --cwd "${repoPath}"`;
-
                 await say({ text: `Starting Claude session in \`${repoPath}\`... :rocket:`, thread_ts: threadTs });
 
-                const created = await this._createTmuxSession(sessionName, repoPath, fullClaudeCmd);
+                const created = await this._createTmuxSession(sessionName, repoPath, claudeCmd);
                 if (!created) {
                     await say({ text: 'Failed to create Claude session. Is tmux installed?', thread_ts: threadTs });
                     return;
