@@ -1,58 +1,13 @@
 {
-  "desktop": {
-    "type": "local",
-    "enabled": true,
-    "config": {}
-  },
-  "email": {
-    "type": "email",
-    "enabled": true
-  },
-  "discord": {
-    "type": "chat",
-    "enabled": false,
-    "config": {
-      "webhook": "",
-      "username": "Claude-Code-Remote",
-      "avatar": null
-    }
-  },
-  "telegram": {
+  "slack": {
     "type": "chat",
     "enabled": true,
     "config": {
       "botToken": "",
-      "chatId": "",
-      "groupId": "",
-      "whitelist": [],
-      "forceIPv4": false
-    }
-  },
-  "whatsapp": {
-    "type": "chat",
-    "enabled": false,
-    "config": {
-      "webhook": "",
-      "apiKey": ""
-    }
-  },
-  "feishu": {
-    "type": "chat",
-    "enabled": false,
-    "config": {
-      "webhook": "",
-      "secret": ""
-    }
-  },
-  "line": {
-    "type": "chat",
-    "enabled": true,
-    "config": {
-      "channelAccessToken": "",
-      "channelSecret": "",
-      "userId": "",
-      "groupId": "",
-      "whitelist": []
+      "appToken": "",
+      "channelId": "",
+      "repoPath": "",
+      "claudeCommand": "claude --dangerously-skip-permissions"
     }
   }
 }

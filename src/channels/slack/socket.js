@@ -14,7 +14,6 @@ const fs = require('fs');
 const axios = require('axios');
 const Logger = require('../../core/logger');
 const AlertMonitor = require('./alert-monitor');
-const AlertWorkflow = require('./alert-workflow');
 
 class SlackSocketHandler {
     constructor(config = {}) {
@@ -43,7 +42,7 @@ class SlackSocketHandler {
 
         // Alert monitoring
         this.alertMonitor = new AlertMonitor(this.app, config);
-        this.alertWorkflow = new AlertWorkflow(this.app, this.db, config);
+        this.trackedIncidents = new Set();
 
         this._setupListeners();
         this._setupHttpServer();
@@ -74,17 +73,22 @@ class SlackSocketHandler {
             )
         `);
 
-        // Migrate: add last_bot_ts column if missing (existing DBs)
+        // Migrate: add columns if missing (existing DBs)
         try {
             this.db.exec('ALTER TABLE sessions ADD COLUMN last_bot_ts TEXT');
+        } catch {
+            // Column already exists
+        }
+        try {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN alert_message_ts TEXT');
         } catch {
             // Column already exists
         }
 
         this._stmts = {
             upsert: this.db.prepare(`
-                INSERT INTO sessions (session_key, session_name, channel_id, thread_ts, repo_path, created_at, updated_at)
-                VALUES (@session_key, @session_name, @channel_id, @thread_ts, @repo_path, @created_at, @updated_at)
+                INSERT INTO sessions (session_key, session_name, channel_id, thread_ts, repo_path, created_at, updated_at, alert_message_ts)
+                VALUES (@session_key, @session_name, @channel_id, @thread_ts, @repo_path, @created_at, @updated_at, @alert_message_ts)
                 ON CONFLICT(session_key) DO UPDATE SET updated_at = @updated_at
             `),
             get: this.db.prepare('SELECT * FROM sessions WHERE session_key = ?'),
@@ -111,7 +115,8 @@ class SlackSocketHandler {
             thread_ts: session.threadTs,
             repo_path: session.repoPath,
             created_at: session.createdAt,
-            updated_at: Date.now()
+            updated_at: Date.now(),
+            alert_message_ts: session.alertMessageTs || null
         });
     }
 
@@ -124,7 +129,8 @@ class SlackSocketHandler {
             threadTs: row.thread_ts,
             repoPath: row.repo_path,
             createdAt: row.created_at,
-            lastBotTs: row.last_bot_ts || null
+            lastBotTs: row.last_bot_ts || null,
+            alertMessageTs: row.alert_message_ts || null
         };
     }
 
@@ -136,7 +142,8 @@ class SlackSocketHandler {
             threadTs: row.thread_ts,
             repoPath: row.repo_path,
             createdAt: row.created_at,
-            updatedAt: row.updated_at
+            updatedAt: row.updated_at,
+            alertMessageTs: row.alert_message_ts || null
         }));
     }
 
@@ -152,7 +159,7 @@ class SlackSocketHandler {
      * On startup, check which DB sessions still have a live tmux session.
      * Remove dead ones.
      */
-    _reconcileSessions() {
+    async _reconcileSessions() {
         const sessions = this._getAllSessions();
         let alive = 0;
         let removed = 0;
@@ -162,6 +169,13 @@ class SlackSocketHandler {
                 alive++;
                 this.logger.info(`Recovered session: ${s.sessionName} (channel ${s.channelId})`);
             } else {
+                // Swap alert reactions for dead alert sessions
+                const row = this._stmts.get.get(s.sessionKey);
+                if (row?.alert_message_ts) {
+                    await this._removeReaction(s.channelId, row.alert_message_ts, 'eyes');
+                    await this._addReaction(s.channelId, row.alert_message_ts, 'white_check_mark');
+                    this.logger.info(`Alert session ${s.sessionName} dead — swapped reactions`);
+                }
                 this._deleteSession(s.sessionKey);
                 removed++;
             }
@@ -212,6 +226,60 @@ class SlackSocketHandler {
             }
         }
         return downloaded;
+    }
+
+    // ─── Reaction Helpers ──────────────────────────────────────────────
+
+    async _addReaction(channelId, messageTs, name) {
+        try {
+            await this.app.client.reactions.add({ channel: channelId, timestamp: messageTs, name });
+        } catch (error) {
+            if (!error.message?.includes('already_reacted')) {
+                this.logger.error(`Failed to add reaction ${name}: ${error.message}`);
+            }
+        }
+    }
+
+    async _removeReaction(channelId, messageTs, name) {
+        try {
+            await this.app.client.reactions.remove({ channel: channelId, timestamp: messageTs, name });
+        } catch (error) {
+            if (!error.message?.includes('no_reaction')) {
+                this.logger.error(`Failed to remove reaction ${name}: ${error.message}`);
+            }
+        }
+    }
+
+    // ─── PagerDuty API ──────────────────────────────────────────────
+
+    async _acknowledgePagerDuty(incidentId) {
+        const token = this.config.pagerdutyApiToken;
+        const fromEmail = this.config.pagerdutyFromEmail;
+        if (!token || !incidentId) return null;
+
+        try {
+            const statusRes = await axios.get(
+                `https://api.pagerduty.com/incidents/${incidentId}`,
+                { headers: { 'Authorization': `Token token=${token}`, 'Content-Type': 'application/json' } }
+            );
+            const status = statusRes.data?.incident?.status;
+            this.logger.info(`PD incident ${incidentId} status: ${status}`);
+
+            if (status === 'acknowledged' || status === 'resolved') {
+                return { skipped: true, status };
+            }
+
+            await axios.put(
+                `https://api.pagerduty.com/incidents/${incidentId}`,
+                { incident: { type: 'incident_reference', status: 'acknowledged' } },
+                { headers: { 'Authorization': `Token token=${token}`, 'Content-Type': 'application/json', 'From': fromEmail } }
+            );
+            this.logger.info(`PD incident ${incidentId} acknowledged`);
+            return { skipped: false, status: 'acknowledged' };
+        } catch (error) {
+            this.logger.error(`PD API error for ${incidentId}: ${error.message}`);
+            return null;
+        }
     }
 
     // ─── Thread Context ─────────────────────────────────────────────
@@ -423,18 +491,65 @@ class SlackSocketHandler {
 
         this.logger.info(`PagerDuty alert detected in ${channelId}: incident=${incidentId || 'unknown'} ts=${messageTs}`);
 
-        const result = await this.alertWorkflow.startAlertWorkflow({
-            channelId,
-            messageTs,
-            text,
-            incidentId,
-            files: event.files
-        });
+        // Dedup by incident ID
+        if (incidentId && this.trackedIncidents.has(incidentId)) {
+            this.logger.info(`Skipping duplicate incident ${incidentId}`);
+            return;
+        }
 
-        if (result.started) {
-            this.logger.info(`Alert workflow started for ${messageTs}`);
+        // Dedup by session key (already being investigated in this thread)
+        const sessionKey = `${channelId}-${messageTs}`;
+        if (this._getSession(sessionKey)) {
+            this.logger.info(`Skipping: session already exists for ${sessionKey}`);
+            return;
+        }
+
+        if (incidentId) this.trackedIncidents.add(incidentId);
+
+        // PD acknowledge
+        if (incidentId && this.config.pagerdutyApiToken) {
+            const pdResult = await this._acknowledgePagerDuty(incidentId);
+            if (pdResult?.skipped) {
+                this.logger.info(`PD incident ${incidentId} already ${pdResult.status} — skipping`);
+                if (incidentId) this.trackedIncidents.delete(incidentId);
+                return;
+            }
+        }
+
+        // React with eyes
+        await this._addReaction(channelId, messageTs, 'eyes');
+
+        // Download attached images
+        const imagePaths = await this._downloadSlackImages(event.files, `alert-${messageTs.replace('.', '')}`);
+        const imageInstruction = imagePaths.length > 0
+            ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
+            : '';
+
+        // Build prompt
+        const permalink = await this._getPermalink(channelId, messageTs);
+        const alertSkill = this.config.alertSkill;
+        let prompt;
+        if (alertSkill && permalink) {
+            prompt = `/${alertSkill} ${permalink}${imageInstruction}`;
+        } else if (alertSkill) {
+            prompt = `/${alertSkill} Alert: ${text.substring(0, 500)}${imageInstruction}`;
+        } else if (permalink) {
+            prompt = `Investigate this PagerDuty alert: ${permalink}${imageInstruction}`;
         } else {
-            this.logger.info(`Alert workflow skipped for ${messageTs}: ${result.reason}`);
+            prompt = `Investigate this PagerDuty alert: ${text.substring(0, 500)}${imageInstruction}`;
+        }
+
+        // Use the regular command flow — messageTs as threadTs (replies go in alert thread)
+        await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
+    }
+
+    async _getPermalink(channelId, messageTs) {
+        try {
+            const result = await this.app.client.chat.getPermalink({ channel: channelId, message_ts: messageTs });
+            return result.permalink;
+        } catch (error) {
+            this.logger.error(`Failed to get permalink: ${error.message}`);
+            return null;
         }
     }
 
@@ -465,32 +580,18 @@ class SlackSocketHandler {
             return;
         }
 
-        // Check if this is an alert workflow thread
-        const alertThreadTs = event.thread_ts; // The root message ts of the thread
-        if (alertThreadTs && this.alertWorkflow.isActive(alertThreadTs)) {
-            if (text === '/exit') {
-                await this.alertWorkflow.handleExit(alertThreadTs);
-                await this.app.client.reactions.add({
-                    channel: channelId,
-                    timestamp: event.ts,
-                    name: 'white_check_mark',
-                });
-                return;
-            }
-            // Forward follow-up messages to the alert workflow
-            const handled = await this.alertWorkflow.handleFollowUp(alertThreadTs, text);
-            if (handled) {
-                this.logger.info(`Follow-up forwarded to alert workflow: ${alertThreadTs}`);
-                return;
-            }
-        }
-
         await this._processCommand(channelId, threadTs, text, say, event.ts);
     }
 
     // ─── Command Processing ──────────────────────────────────────────
 
-    async _processCommand(channelId, threadTs, command, say, messageTs) {
+    async _processCommand(channelId, threadTs, command, say, messageTs, alertMessageTs = null) {
+        // Create a say function if one wasn't provided (e.g. alert triggers)
+        if (!say) {
+            say = async ({ text, thread_ts }) => {
+                await this.app.client.chat.postMessage({ channel: channelId, text, thread_ts: thread_ts || threadTs });
+            };
+        }
         const sessionKey = `${channelId}-${threadTs}`;
         let session = this._getSession(sessionKey);
         let threadContext = null; // Will hold formatted thread messages to prepend
@@ -582,11 +683,18 @@ class SlackSocketHandler {
                     command = 'hi';
                 }
 
-                await say({ text: `Starting Claude session in \`${repoPath}\`... :rocket:`, thread_ts: threadTs });
+                if (!alertMessageTs) {
+                    await say({ text: `Starting Claude session in \`${repoPath}\`... :rocket:`, thread_ts: threadTs });
+                }
 
                 const created = await this._createTmuxSession(sessionName, repoPath, claudeCmd);
                 if (!created) {
-                    await say({ text: 'Failed to create Claude session. Is tmux installed?', thread_ts: threadTs });
+                    if (alertMessageTs) {
+                        await this._removeReaction(channelId, alertMessageTs, 'eyes');
+                        await this._addReaction(channelId, alertMessageTs, 'x');
+                    } else {
+                        await say({ text: 'Failed to create Claude session. Is tmux installed?', thread_ts: threadTs });
+                    }
                     return;
                 }
 
@@ -595,7 +703,8 @@ class SlackSocketHandler {
                     channelId,
                     threadTs,
                     repoPath,
-                    createdAt: Date.now()
+                    createdAt: Date.now(),
+                    alertMessageTs: alertMessageTs || null
                 };
                 this._saveSession(session);
 
@@ -617,6 +726,11 @@ class SlackSocketHandler {
                 if (this.pollers.has(pollKey)) {
                     clearInterval(this.pollers.get(pollKey).interval);
                     this.pollers.delete(pollKey);
+                }
+                // Swap alert reactions if this was an alert session
+                if (session.alertMessageTs) {
+                    await this._removeReaction(channelId, session.alertMessageTs, 'eyes');
+                    await this._addReaction(channelId, session.alertMessageTs, 'white_check_mark');
                 }
                 await this.app.client.reactions.add({
                     channel: channelId,
@@ -1052,7 +1166,7 @@ class SlackSocketHandler {
                 },
                 '/trigger-alert': {
                     post: {
-                        summary: 'Manually trigger an alert investigation workflow',
+                        summary: 'Manually trigger an alert investigation session',
                         requestBody: {
                             required: true,
                             content: { 'application/json': { schema: { type: 'object', required: ['url'], properties: { url: { type: 'string', example: 'https://wego.slack.com/archives/C07DEF456/p1709123456789012' } } } } }
@@ -1061,7 +1175,7 @@ class SlackSocketHandler {
                             '200': { description: 'Investigation started', content: { 'application/json': { schema: { type: 'object', properties: { status: { type: 'string' }, channelId: { type: 'string' }, messageTs: { type: 'string' } } } } } },
                             '400': { description: 'Missing/invalid URL or bad JSON' },
                             '405': { description: 'Wrong HTTP method' },
-                            '409': { description: 'Workflow already active for this message' },
+                            '409': { description: 'Session already exists for this message' },
                             '503': { description: 'Slack app not initialized yet' }
                         }
                     }
@@ -1178,18 +1292,19 @@ class SlackSocketHandler {
                 return res.status(400).json({ error: 'Missing or invalid "url" field. Provide a Slack message permalink.' });
             }
 
-            const parsed = AlertWorkflow.parseSlackUrl(url);
+            const parsed = this._parseSlackUrl(url);
             if (!parsed) {
                 return res.status(400).json({ error: 'Invalid Slack message URL format. Expected: https://<workspace>.slack.com/archives/<channel>/p<timestamp>' });
             }
 
-            const { channelId, messageTs } = parsed;
+            const channelId = parsed.channel;
+            const messageTs = parsed.ts;
             this.logger.info(`Trigger-alert received: channelId=${channelId} messageTs=${messageTs}`);
 
             // Check for duplicate
-            if (this.alertWorkflow.isActive(messageTs)) {
-                this.logger.info(`Trigger-alert blocked: workflow already active for messageTs=${messageTs}`);
-                return res.status(409).json({ error: 'Workflow already active for this message', channelId, messageTs });
+            const sessionKey = `${channelId}-${messageTs}`;
+            if (this._getSession(sessionKey)) {
+                return res.status(409).json({ error: 'Session already exists for this message', channelId, messageTs });
             }
 
             try {
@@ -1209,22 +1324,32 @@ class SlackSocketHandler {
                 const text = message.text || '';
                 const incidentId = this.alertMonitor.extractIncidentId(message);
 
-                const result = await this.alertWorkflow.startAlertWorkflow({
-                    channelId,
-                    messageTs,
-                    text,
-                    incidentId,
-                    force: true,
-                    files: message.files
-                });
+                // React with eyes
+                await this._addReaction(channelId, messageTs, 'eyes');
 
-                if (result.started) {
-                    this.logger.info(`Trigger-alert started workflow for messageTs=${messageTs}`);
-                    res.json({ status: 'investigating', channelId, messageTs });
+                // Download images
+                const imagePaths = await this._downloadSlackImages(message.files, `alert-${messageTs.replace('.', '')}`);
+                const imageInstruction = imagePaths.length > 0
+                    ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
+                    : '';
+
+                // Build prompt
+                const permalink = await this._getPermalink(channelId, messageTs);
+                const alertSkill = this.config.alertSkill;
+                let prompt;
+                if (alertSkill && permalink) {
+                    prompt = `/${alertSkill} ${permalink}${imageInstruction}`;
+                } else if (alertSkill) {
+                    prompt = `/${alertSkill} Alert: ${text.substring(0, 500)}${imageInstruction}`;
+                } else if (permalink) {
+                    prompt = `Investigate this alert: ${permalink}${imageInstruction}`;
                 } else {
-                    this.logger.info(`Trigger-alert workflow not started: ${result.reason} for messageTs=${messageTs}`);
-                    res.status(409).json({ status: result.reason, channelId, messageTs });
+                    prompt = `Investigate this alert: ${text.substring(0, 500)}${imageInstruction}`;
                 }
+
+                // Use the regular command flow
+                await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
+                res.json({ status: 'investigating', channelId, messageTs });
             } catch (error) {
                 this.logger.error(`Trigger alert error: ${error.message}`);
                 res.status(500).json({ error: error.message });
@@ -1265,7 +1390,7 @@ class SlackSocketHandler {
         const t0 = Date.now();
 
         // Reconcile DB sessions with live tmux sessions
-        this._reconcileSessions();
+        await this._reconcileSessions();
         this.logger.info(`[startup] reconcileSessions: ${Date.now() - t0}ms`);
 
         const t1 = Date.now();
@@ -1274,14 +1399,10 @@ class SlackSocketHandler {
         this._setupConnectionMonitor();
         this.logger.info(`[startup] Slack Socket Mode connected: ${Date.now() - t1}ms`);
 
-        // Resolve monitored channels and recover alert workflows
+        // Resolve monitored channels
         const t2 = Date.now();
         await this.alertMonitor.resolveMonitorChannels();
         this.logger.info(`[startup] resolveMonitorChannels: ${Date.now() - t2}ms`);
-
-        const t3 = Date.now();
-        await this.alertWorkflow.recoverWorkflows();
-        this.logger.info(`[startup] recoverWorkflows: ${Date.now() - t3}ms`);
 
         this.httpServer = this._httpApp.listen(this.httpPort, () => {
             this.logger.info(`[startup] HTTP API on port ${this.httpPort}`);
@@ -1303,13 +1424,6 @@ class SlackSocketHandler {
 
         // NOTE: We do NOT kill tmux sessions on stop.
         // They persist so conversations can resume after restart.
-
-        // Clean up alert workflow timers (but preserve tmux sessions for recovery)
-        if (this.alertWorkflow) {
-            for (const [, wf] of this.alertWorkflow.activeWorkflows) {
-                if (wf.feedbackTimer) clearTimeout(wf.feedbackTimer);
-            }
-        }
 
         if (this.db) {
             this.db.close();

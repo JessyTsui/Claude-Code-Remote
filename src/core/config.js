@@ -1,6 +1,6 @@
 /**
  * Claude-Code-Remote Configuration Manager
- * Handles loading, merging, and saving configurations
+ * Handles loading, merging, and saving configurations — Slack only
  */
 
 const fs = require('fs');
@@ -14,7 +14,7 @@ class ConfigManager {
         this.userConfigPath = path.join(this.configDir, 'user.json');
         this.defaultConfigPath = path.join(this.configDir, 'default.json');
         this.channelsConfigPath = path.join(this.configDir, 'channels.json');
-        
+
         this._config = null;
         this._channels = null;
     }
@@ -22,10 +22,6 @@ class ConfigManager {
     getDefaultConfig() {
         return {
             language: 'en',
-            sound: {
-                completed: 'Glass',
-                waiting: 'Tink'
-            },
             enabled: true,
             timeout: 5,
             customMessages: {
@@ -33,77 +29,20 @@ class ConfigManager {
                 waiting: null
             },
             channels: {
-                desktop: {
+                slack: {
                     enabled: true,
                     priority: 1
                 }
             },
             relay: {
                 enabled: false,
-                port: 3000,
-                auth: {
-                    enabled: false,
-                    token: null
-                }
+                injectionMode: 'tmux'
             }
         };
     }
 
     getDefaultChannelsConfig() {
         return {
-            desktop: {
-                type: 'local',
-                enabled: true,
-                config: {}
-            },
-            email: {
-                type: 'email',
-                enabled: process.env.SMTP_USER ? true : false,
-                config: {
-                    smtp: {
-                        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-                        port: parseInt(process.env.SMTP_PORT) || 587,
-                        secure: process.env.SMTP_SECURE === 'true',
-                        auth: {
-                            user: process.env.SMTP_USER || '',
-                            pass: process.env.SMTP_PASS || ''
-                        }
-                    },
-                    imap: {
-                        host: process.env.IMAP_HOST || 'imap.gmail.com',
-                        port: parseInt(process.env.IMAP_PORT) || 993,
-                        secure: process.env.IMAP_SECURE !== 'false',
-                        auth: {
-                            user: process.env.IMAP_USER || process.env.SMTP_USER || '',
-                            pass: process.env.IMAP_PASS || process.env.SMTP_PASS || ''
-                        }
-                    },
-                    from: process.env.EMAIL_FROM || `${process.env.EMAIL_FROM_NAME || 'Claude Code Remote'} <${process.env.SMTP_USER}>`,
-                    to: process.env.EMAIL_TO || '',
-                    template: {
-                        checkInterval: parseInt(process.env.CHECK_INTERVAL) || 30
-                    }
-                }
-            },
-            discord: {
-                type: 'chat',
-                enabled: false,
-                config: {
-                    webhook: '',
-                    username: 'Claude-Code-Remote',
-                    avatar: null
-                }
-            },
-            telegram: {
-                type: 'chat',
-                enabled: process.env.TELEGRAM_ENABLED === 'true',
-                config: {
-                    botToken: process.env.TELEGRAM_BOT_TOKEN || '',
-                    chatId: process.env.TELEGRAM_CHAT_ID || '',
-                    groupId: process.env.TELEGRAM_GROUP_ID || '',
-                    forceIPv4: process.env.TELEGRAM_FORCE_IPV4 === 'true'
-                }
-            },
             slack: {
                 type: 'chat',
                 enabled: process.env.SLACK_ENABLED === 'true',
@@ -120,8 +59,7 @@ class ConfigManager {
 
     load() {
         this.logger.debug('Loading configuration...');
-        
-        // Load default config
+
         let defaultConfig = this.getDefaultConfig();
         try {
             if (fs.existsSync(this.defaultConfigPath)) {
@@ -132,7 +70,6 @@ class ConfigManager {
             this.logger.warn('Failed to load default config:', error.message);
         }
 
-        // Load user config
         let userConfig = {};
         try {
             if (fs.existsSync(this.userConfigPath)) {
@@ -142,10 +79,8 @@ class ConfigManager {
             this.logger.warn('Failed to load user config:', error.message);
         }
 
-        // Merge configs
         this._config = this._deepMerge(defaultConfig, userConfig);
-        
-        // Load channels config
+
         this._channels = this.getDefaultChannelsConfig();
         try {
             if (fs.existsSync(this.channelsConfigPath)) {
@@ -162,19 +97,15 @@ class ConfigManager {
 
     save() {
         this.logger.debug('Saving user configuration...');
-        
+
         try {
-            // Ensure config directory exists
             if (!fs.existsSync(this.configDir)) {
                 fs.mkdirSync(this.configDir, { recursive: true });
             }
 
-            // Save user config
             fs.writeFileSync(this.userConfigPath, JSON.stringify(this._config, null, 2));
-            
-            // Save channels config
             fs.writeFileSync(this.channelsConfigPath, JSON.stringify(this._channels, null, 2));
-            
+
             this.logger.info('Configuration saved successfully');
             return true;
         } catch (error) {
@@ -190,7 +121,7 @@ class ConfigManager {
 
         const keys = key.split('.');
         let value = this._config;
-        
+
         for (const k of keys) {
             if (value && typeof value === 'object' && k in value) {
                 value = value[k];
@@ -198,7 +129,7 @@ class ConfigManager {
                 return defaultValue;
             }
         }
-        
+
         return value;
     }
 
@@ -209,7 +140,7 @@ class ConfigManager {
 
         const keys = key.split('.');
         let target = this._config;
-        
+
         for (let i = 0; i < keys.length - 1; i++) {
             const k = keys[i];
             if (!(k in target) || typeof target[k] !== 'object') {
@@ -217,7 +148,7 @@ class ConfigManager {
             }
             target = target[k];
         }
-        
+
         target[keys[keys.length - 1]] = value;
         return this;
     }
@@ -240,7 +171,6 @@ class ConfigManager {
     getProjectName() {
         try {
             const { execSync } = require('child_process');
-            // Try to get git repository name first
             const gitName = execSync('git rev-parse --show-toplevel 2>/dev/null', { encoding: 'utf8' }).trim();
             if (gitName) {
                 return path.basename(gitName);
@@ -248,14 +178,13 @@ class ConfigManager {
         } catch (e) {
             // Not a git repository
         }
-        
-        // Fall back to current directory name
+
         return path.basename(process.cwd());
     }
 
     _deepMerge(target, source) {
         const result = { ...target };
-        
+
         for (const key in source) {
             if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
                 result[key] = this._deepMerge(result[key] || {}, source[key]);
@@ -263,7 +192,7 @@ class ConfigManager {
                 result[key] = source[key];
             }
         }
-        
+
         return result;
     }
 }

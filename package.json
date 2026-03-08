@@ -1,29 +1,20 @@
 {
   "name": "claude-code-remote",
   "version": "1.0.0",
-  "description": "Claude Code Smart Notification System - Send desktop notifications when Claude completes tasks or needs input",
-  "main": "hook-notify.js",
+  "description": "Claude Code Remote Notification System - Slack + Tmux",
+  "main": "claude-hook-notify.js",
   "scripts": {
     "setup": "node setup.js",
-    "config": "node claude-remote-config.js",
-    "daemon:start": "node claude-remote.js daemon start",
-    "daemon:stop": "node claude-remote.js daemon stop",
-    "daemon:status": "node claude-remote.js daemon status",
-    "relay:pty": "node start-relay-pty.js",
-    "relay:start": "INJECTION_MODE=pty node src/relay/relay-pty.js",
-    "slack": "node start-slack-socket.js",
-    "telegram": "node start-telegram-webhook.js",
-    "line": "node start-line-webhook.js",
-    "webhooks": "node start-all-webhooks.js"
+    "slack": "node start-slack-socket.js"
   },
   "keywords": [
     "claude-code",
     "notification",
-    "desktop-notification",
+    "slack",
+    "tmux",
     "hooks",
     "productivity",
     "development-tools",
-    "task-management",
     "claude",
     "ai-assistant"
   ],
@@ -32,11 +23,6 @@
   "engines": {
     "node": ">=14.0.0"
   },
-  "os": [
-    "darwin",
-    "linux",
-    "win32"
-  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/Claude-Code-Remote/Claude-Code-Remote.git"
@@ -50,28 +36,10 @@
     "axios": "^1.6.0",
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.2.1",
-    "execa": "^9.6.0",
     "express": "^4.18.2",
-    "imapflow": "^1.0.191",
-    "mailparser": "^3.7.4",
-    "node-imap": "^0.9.6",
-    "node-pty": "^1.0.0",
-    "nodemailer": "^7.0.5",
     "pino": "^9.7.0",
     "pino-pretty": "^13.0.0",
     "swagger-ui-express": "^5.0.1",
     "uuid": "^11.1.0"
-  },
-  "files": [
-    "hook-notify.js",
-    "config-tool.js",
-    "install.js",
-    "config.json",
-    "i18n.json",
-    "claude-hooks.json",
-    "sounds/",
-    "README.md",
-    "QUICKSTART.md",
-    "LICENSE"
-  ]
+  }
 }

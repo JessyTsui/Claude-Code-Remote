@@ -1,9 +1,5 @@
 {
-  "language": "zh-CN",
-  "sound": {
-    "completed": "Glass",
-    "waiting": "Tink"
-  },
+  "language": "en",
   "enabled": true,
   "timeout": 5,
   "customMessages": {
@@ -11,17 +7,13 @@
     "waiting": null
   },
   "channels": {
-    "desktop": {
+    "slack": {
       "enabled": true,
       "priority": 1
     }
   },
   "relay": {
     "enabled": false,
-    "port": 3000,
-    "auth": {
-      "enabled": false,
-      "token": null
-    }
+    "injectionMode": "tmux"
   }
 }
