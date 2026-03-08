@@ -751,8 +751,17 @@ class SlackSocketHandler {
             this.logger.info(`Command injected into ${session.sessionName}: ${fullCommand.substring(0, 120)}`);
 
             // Commands like /compact don't produce a standard response — just confirm
-            if (command.startsWith('/')) {
-                await say({ text: `Sent \`${command}\` to Claude session.`, thread_ts: threadTs });
+            // Skip confirmation for alert sessions (eyes reaction is sufficient)
+            if (command.startsWith('/') && !session.alertMessageTs) {
+                // Parse skill name and argument for a cleaner confirmation
+                const slashMatch = command.match(/^\/(\S+)\s+(.*)/s);
+                if (slashMatch) {
+                    const skillName = slashMatch[1];
+                    const argument = slashMatch[2].trim();
+                    await say({ text: `Execute skill \`${skillName}\` with argument \`${argument}\``, thread_ts: threadTs });
+                } else {
+                    await say({ text: `Sent \`${command}\` to Claude session.`, thread_ts: threadTs });
+                }
                 // Still poll for the eventual response
             }
 
@@ -851,6 +860,8 @@ class SlackSocketHandler {
     _pollForResponse(session, say, sessionKey = null) {
         const { sessionName, threadTs } = session;
         const pollKey = sessionName;
+        const isAlertSession = !!session.alertMessageTs;
+        let isFirstResponse = isAlertSession; // only true for the very first response of an alert
 
         if (this.pollers.has(pollKey)) {
             clearInterval(this.pollers.get(pollKey).interval);
@@ -929,7 +940,14 @@ class SlackSocketHandler {
                         try {
                             const sessionStats = this._extractSessionStats(currentOutput);
                             this.logger.info(`Response extracted (${response.length} chars): "${response.substring(0, 200)}"`);
-                            await this._sendResponse(say, threadTs, response, sessionStats);
+
+                            if (isFirstResponse) {
+                                // Alert first response: post summary + upload full report as file
+                                await this._sendAlertSummary(say, threadTs, response, sessionStats);
+                                isFirstResponse = false;
+                            } else {
+                                await this._sendResponse(say, threadTs, response, sessionStats);
+                            }
                             this.logger.info(`Response sent to Slack thread ${threadTs}`);
 
                             // Track last bot response timestamp for thread context
@@ -1102,6 +1120,66 @@ class SlackSocketHandler {
                 await say({ text: chunks[i], thread_ts: threadTs, blocks });
             }
         }
+    }
+
+    /**
+     * Extract the Recommended Action section from an alert investigation response.
+     * Looks for text between "Recommended Action:" and the next "---" or section boundary.
+     */
+    _extractRecommendedAction(response) {
+        // Match "Recommended Action:" followed by content, up to next "---" or end
+        const match = response.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*|$)/i);
+        if (match) {
+            return match[1].trim();
+        }
+        // Fallback: return first 500 chars
+        return response.substring(0, 500).trim();
+    }
+
+    /**
+     * Send alert summary: Recommended Action as Slack message + full report as file upload.
+     */
+    async _sendAlertSummary(say, threadTs, response, stats) {
+        const summary = this._extractRecommendedAction(response);
+        const statsLine = stats
+            ? `\n_${stats.model || ''} · Ctx: ${stats.context || '?'} · In: ${stats.tokensIn || '?'} Out: ${stats.tokensOut || '?'}_`
+            : '';
+
+        // Post the summary (Recommended Action only)
+        const blocks = [
+            { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${summary}` } }
+        ];
+        if (statsLine) {
+            blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: statsLine.trim() }] });
+        }
+        await say({ text: `Recommended Action: ${summary}`, thread_ts: threadTs, blocks });
+
+        // Upload full report as a text file
+        try {
+            const channelId = this._getChannelForThread(threadTs);
+            await this.app.client.filesUploadV2({
+                channel_id: channelId || this.config.channelId,
+                thread_ts: threadTs,
+                content: response,
+                filename: `alert-investigation-${Date.now()}.txt`,
+                title: 'Full Investigation Report',
+                initial_comment: '_Full investigation details attached._',
+            });
+        } catch (err) {
+            this.logger.error(`Failed to upload alert report file: ${err.message}`);
+            // Fallback: send full response as regular messages
+            await this._sendResponse(say, threadTs, response, stats);
+        }
+    }
+
+    /**
+     * Look up the channel ID for a given thread timestamp from stored sessions.
+     */
+    _getChannelForThread(threadTs) {
+        try {
+            const row = this.db.prepare('SELECT channel_id FROM sessions WHERE thread_ts = ?').get(threadTs);
+            return row ? row.channel_id : null;
+        } catch { return null; }
     }
 
     _isOwner(userId) {
