@@ -69,9 +69,17 @@ class SlackSocketHandler {
                 thread_ts     TEXT NOT NULL,
                 repo_path     TEXT NOT NULL,
                 created_at    INTEGER NOT NULL,
-                updated_at    INTEGER NOT NULL
+                updated_at    INTEGER NOT NULL,
+                last_bot_ts   TEXT
             )
         `);
+
+        // Migrate: add last_bot_ts column if missing (existing DBs)
+        try {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_bot_ts TEXT');
+        } catch {
+            // Column already exists
+        }
 
         this._stmts = {
             upsert: this.db.prepare(`
@@ -83,7 +91,8 @@ class SlackSocketHandler {
             all: this.db.prepare('SELECT * FROM sessions ORDER BY updated_at DESC'),
             delete: this.db.prepare('DELETE FROM sessions WHERE session_key = ?'),
             deleteOld: this.db.prepare('DELETE FROM sessions WHERE updated_at < ?'),
-            touch: this.db.prepare('UPDATE sessions SET updated_at = ? WHERE session_key = ?')
+            touch: this.db.prepare('UPDATE sessions SET updated_at = ? WHERE session_key = ?'),
+            updateLastBotTs: this.db.prepare('UPDATE sessions SET last_bot_ts = ?, updated_at = ? WHERE session_key = ?')
         };
 
         // Clean up sessions older than 7 days
@@ -114,7 +123,8 @@ class SlackSocketHandler {
             channelId: row.channel_id,
             threadTs: row.thread_ts,
             repoPath: row.repo_path,
-            createdAt: row.created_at
+            createdAt: row.created_at,
+            lastBotTs: row.last_bot_ts || null
         };
     }
 
@@ -202,6 +212,107 @@ class SlackSocketHandler {
             }
         }
         return downloaded;
+    }
+
+    // ─── Thread Context ─────────────────────────────────────────────
+
+    /**
+     * Fetch thread messages from Slack, optionally only those after a given timestamp.
+     * @param {string} channelId - The Slack channel ID
+     * @param {string} threadTs - The thread root timestamp
+     * @param {string|null} sinceTs - Only return messages after this timestamp (exclusive)
+     * @returns {Array<{user: string, text: string, ts: string}>}
+     */
+    async _fetchThreadMessages(channelId, threadTs, sinceTs = null) {
+        const messages = [];
+        let cursor;
+
+        do {
+            const result = await this.app.client.conversations.replies({
+                channel: channelId,
+                ts: threadTs,
+                limit: 200,
+                ...(cursor ? { cursor } : {})
+            });
+
+            for (const msg of (result.messages || [])) {
+                // Skip the thread root if sinceTs is not set (it's the first message)
+                // but include it for full context on first mention
+                if (sinceTs && parseFloat(msg.ts) <= parseFloat(sinceTs)) continue;
+                // Skip bot's own messages
+                if (msg.bot_id || (msg.app_id && !msg.user)) continue;
+                messages.push({
+                    user: msg.user || 'unknown',
+                    text: msg.text || '',
+                    ts: msg.ts
+                });
+            }
+
+            cursor = result.response_metadata?.next_cursor;
+        } while (cursor);
+
+        return messages;
+    }
+
+    /**
+     * Resolve a Slack user ID to a display name. Caches results in memory.
+     */
+    async _resolveUserName(userId) {
+        if (!this._userCache) this._userCache = new Map();
+        if (this._userCache.has(userId)) return this._userCache.get(userId);
+
+        try {
+            const result = await this.app.client.users.info({ user: userId });
+            const name = result.user?.profile?.display_name
+                || result.user?.profile?.real_name
+                || result.user?.name
+                || userId;
+            this._userCache.set(userId, name);
+            return name;
+        } catch {
+            this._userCache.set(userId, userId);
+            return userId;
+        }
+    }
+
+    /**
+     * Format thread messages into a context string for Claude.
+     * Replaces <@UXXXX> mentions with display names.
+     */
+    async _formatThreadContext(messages) {
+        // Collect all unique user IDs (from messages and mentions)
+        const userIds = new Set();
+        for (const msg of messages) {
+            userIds.add(msg.user);
+            const mentions = msg.text.match(/<@([A-Z0-9]+)>/g) || [];
+            for (const m of mentions) {
+                userIds.add(m.replace(/<@|>/g, ''));
+            }
+        }
+
+        // Resolve all names in parallel
+        const nameMap = new Map();
+        await Promise.all([...userIds].map(async (id) => {
+            nameMap.set(id, await this._resolveUserName(id));
+        }));
+
+        // Format each message
+        const lines = messages.map(msg => {
+            let text = msg.text;
+            // Replace <@UXXXX> with display names
+            text = text.replace(/<@([A-Z0-9]+)>/g, (_, id) => `@${nameMap.get(id) || id}`);
+            const name = nameMap.get(msg.user) || msg.user;
+            return `${name}: ${text}`;
+        });
+
+        return lines.join('\n');
+    }
+
+    /**
+     * Update the last bot response timestamp for a session.
+     */
+    _updateLastBotTs(sessionKey, ts) {
+        this._stmts.updateLastBotTs.run(ts, Date.now(), sessionKey);
     }
 
     // ─── Slack Event Listeners ───────────────────────────────────────
@@ -378,13 +489,22 @@ class SlackSocketHandler {
     async _processCommand(channelId, threadTs, command, say) {
         const sessionKey = `${channelId}-${threadTs}`;
         let session = this._getSession(sessionKey);
+        let threadContext = null; // Will hold formatted thread messages to prepend
 
         try {
             if (session && this._isTmuxSessionAlive(session.sessionName)) {
-                // Existing session — update timestamp
+                // Existing session — fetch only messages since last bot response
                 this._touchSession(sessionKey);
+
+                if (session.lastBotTs) {
+                    const newMessages = await this._fetchThreadMessages(channelId, threadTs, session.lastBotTs);
+                    if (newMessages.length > 0) {
+                        threadContext = await this._formatThreadContext(newMessages);
+                        this.logger.info(`Thread context (since ${session.lastBotTs}): ${newMessages.length} messages`);
+                    }
+                }
             } else if (session && !this._isTmuxSessionAlive(session.sessionName)) {
-                // Session in DB but tmux died — recreate
+                // Session in DB but tmux died — recreate with full thread context
                 this.logger.warn(`Tmux session ${session.sessionName} is dead, recreating...`);
                 await say({ text: 'Previous Claude session ended. Starting a new one... :rocket:', thread_ts: threadTs });
 
@@ -399,6 +519,13 @@ class SlackSocketHandler {
                     return;
                 }
                 this._touchSession(sessionKey);
+
+                // Fetch full thread context since session was recreated
+                const allMessages = await this._fetchThreadMessages(channelId, threadTs);
+                if (allMessages.length > 0) {
+                    threadContext = await this._formatThreadContext(allMessages);
+                    this.logger.info(`Full thread context (recreated session): ${allMessages.length} messages`);
+                }
             } else {
                 // Brand new conversation
                 const sessionName = this._generateSessionName(channelId, threadTs);
@@ -468,6 +595,13 @@ class SlackSocketHandler {
                 };
                 this._saveSession(session);
 
+                // Fetch full thread context for brand new session
+                const allMessages = await this._fetchThreadMessages(channelId, threadTs);
+                if (allMessages.length > 0) {
+                    threadContext = await this._formatThreadContext(allMessages);
+                    this.logger.info(`Full thread context (new session): ${allMessages.length} messages`);
+                }
+
                 this.logger.info(`New session created: ${sessionName} for channel ${channelId}`);
             }
 
@@ -484,9 +618,15 @@ class SlackSocketHandler {
                 return;
             }
 
+            // Build the full command with thread context if available
+            let fullCommand = command;
+            if (threadContext) {
+                fullCommand = `Here is the Slack thread discussion for context:\n\n---\n${threadContext}\n---\n\nMy request: ${command}`;
+            }
+
             // Inject the command into the tmux session
-            await this._injectCommand(session.sessionName, command);
-            this.logger.info(`Command injected into ${session.sessionName}: ${command.substring(0, 80)}`);
+            await this._injectCommand(session.sessionName, fullCommand);
+            this.logger.info(`Command injected into ${session.sessionName}: ${fullCommand.substring(0, 120)}`);
 
             // Commands like /compact don't produce a standard response — just confirm
             if (command.startsWith('/')) {
@@ -494,8 +634,8 @@ class SlackSocketHandler {
                 // Still poll for the eventual response
             }
 
-            // Start polling for response
-            this._pollForResponse(session, say);
+            // Start polling for response (pass sessionKey for tracking last_bot_ts)
+            this._pollForResponse(session, say, sessionKey);
 
         } catch (error) {
             this.logger.error('Error processing command:', error.message);
@@ -586,7 +726,7 @@ class SlackSocketHandler {
 
     // ─── Response Polling ────────────────────────────────────────────
 
-    _pollForResponse(session, say) {
+    _pollForResponse(session, say, sessionKey = null) {
         const { sessionName, threadTs } = session;
         const pollKey = sessionName;
 
@@ -669,6 +809,12 @@ class SlackSocketHandler {
                             this.logger.info(`Response extracted (${response.length} chars): "${response.substring(0, 200)}"`);
                             await this._sendResponse(say, threadTs, response, sessionStats);
                             this.logger.info(`Response sent to Slack thread ${threadTs}`);
+
+                            // Track last bot response timestamp for thread context
+                            if (sessionKey) {
+                                const nowTs = String(Date.now() / 1000);
+                                this._updateLastBotTs(sessionKey, nowTs);
+                            }
                         } catch (err) {
                             this.logger.error(`Failed to send response to Slack: ${err.message}`);
                         } finally {
