@@ -39,7 +39,7 @@ User (Slack)                       Server                          Terminal
 |-- claude-remote.js               # CLI: notify, test, status, config
 |-- setup.js                       # Interactive .env + hooks setup wizard
 |-- start-slack-socket.js          # Slack Socket Mode server launcher
-|-- start.sh                       # Shell wrapper: start/stop/restart/status/logs
+|-- enzo.sh                       # Shell wrapper: start/stop/restart/status/logs
 |-- claude-hooks.json              # Hook template for ~/.claude/settings.json
 |-- package.json                   # Dependencies & scripts
 |-- .env.example                   # Environment variable template
@@ -372,7 +372,7 @@ Server launcher:
 Interactive wizard: prompts for Slack tokens, channel ID, repo path, etc.
 Writes `.env` and upserts hooks into `~/.claude/settings.json`.
 
-#### `start.sh`
+#### `enzo.sh`
 
 Shell service manager. Runs `start-slack-socket.js` via `nohup` with PID tracking.
 

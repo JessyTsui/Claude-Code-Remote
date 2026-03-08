@@ -101,11 +101,11 @@ npm run slack
 Or use the service wrapper:
 
 ```bash
-./start.sh start    # Start in background
-./start.sh stop     # Graceful shutdown
-./start.sh restart  # Restart
-./start.sh status   # Show status + recent logs
-./start.sh logs     # Tail logs
+./enzo.sh start    # Start in background
+./enzo.sh stop     # Graceful shutdown
+./enzo.sh restart  # Restart
+./enzo.sh status   # Show status + recent logs
+./enzo.sh logs     # Tail logs
 ```
 
 ### Test

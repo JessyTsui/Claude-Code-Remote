@@ -1,8 +1,8 @@
 #!/bin/bash
 # Claude Code Remote - Slack Socket Mode Agent
-# Usage: ./start.sh [start|stop|restart|status|logs]
+# Usage: ./enzo.sh [start|stop|restart|status|logs]
 
-APP_NAME="claude-code-remote"
+APP_NAME="enzo"
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="$APP_DIR/tmp/$APP_NAME.pid"
 LOG_FILE="$APP_DIR/tmp/$APP_NAME.log"
