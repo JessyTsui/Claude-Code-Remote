@@ -17,7 +17,7 @@
         "matcher": "*",
         "hooks": [
           {
-            "type": "command", 
+            "type": "command",
             "command": "node /path/to/Claude-Code-Remote/claude-hook-notify.js waiting",
             "timeout": 5
           }

@@ -11,7 +11,10 @@ const express = require('express');
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
+const axios = require('axios');
 const Logger = require('../../core/logger');
+const AlertMonitor = require('./alert-monitor');
+const AlertWorkflow = require('./alert-workflow');
 
 class SlackSocketHandler {
     constructor(config = {}) {
@@ -24,13 +27,24 @@ class SlackSocketHandler {
         this.app = new App({
             token: config.botToken,
             appToken: config.appToken,
-            socketMode: true
+            socketMode: true,
+            logLevel: 'error'
         });
 
         this.httpPort = config.httpPort || 9999;
         this.httpServer = null;
 
+        // Connection state tracking
+        this.connected = false;
+        this._reconnectTimer = null;
+        this._reconnectDelay = 30000; // 30s watchdog
+
         this._initDb();
+
+        // Alert monitoring
+        this.alertMonitor = new AlertMonitor(this.app, config);
+        this.alertWorkflow = new AlertWorkflow(this.app, this.db, config);
+
         this._setupListeners();
         this._setupHttpServer();
     }
@@ -155,12 +169,162 @@ class SlackSocketHandler {
         }
     }
 
+    // ─── Slack Image Download ─────────────────────────────────────────
+
+    /**
+     * Download image files from a Slack message to a temp directory.
+     * @param {Array} files - Slack message files array
+     * @param {string} dirName - Directory name under /tmp for storing images
+     * @returns {string[]} Array of downloaded file paths
+     */
+    async _downloadSlackImages(files, dirName) {
+        if (!files || files.length === 0) return [];
+
+        const imageFiles = files.filter(f => f.mimetype?.startsWith('image/'));
+        if (imageFiles.length === 0) return [];
+
+        const imageDir = path.join('/tmp', dirName);
+        fs.mkdirSync(imageDir, { recursive: true });
+
+        const downloaded = [];
+        for (const file of imageFiles) {
+            try {
+                const filePath = path.join(imageDir, file.name || `image-${Date.now()}.png`);
+                const response = await axios.get(file.url_private_download, {
+                    headers: { Authorization: `Bearer ${this.config.botToken}` },
+                    responseType: 'arraybuffer'
+                });
+                fs.writeFileSync(filePath, response.data);
+                downloaded.push(filePath);
+                this.logger.info(`Downloaded Slack image: ${filePath} (${file.mimetype})`);
+            } catch (e) {
+                this.logger.warn(`Failed to download Slack file ${file.name}: ${e.message}`);
+            }
+        }
+        return downloaded;
+    }
+
     // ─── Slack Event Listeners ───────────────────────────────────────
+
+    _setupConnectionMonitor() {
+        const receiver = this.app.receiver;
+        if (!receiver || !receiver.client) {
+            this.logger.warn('Cannot attach connection monitor: no Socket Mode receiver');
+            return;
+        }
+
+        const client = receiver.client;
+
+        client.on('connected', () => {
+            this.connected = true;
+            this.logger.info('Socket Mode connected');
+            this._clearReconnectTimer();
+        });
+
+        client.on('disconnected', () => {
+            this.connected = false;
+            this.logger.warn('Socket Mode disconnected');
+            this._startReconnectTimer();
+        });
+
+        client.on('error', (error) => {
+            this.logger.error(`Socket Mode error: ${error.message}`);
+        });
+
+        client.on('close', (code, reason) => {
+            this.connected = false;
+            this.logger.warn(`Socket Mode closed: code=${code} reason=${reason || 'none'}`);
+            this._startReconnectTimer();
+        });
+    }
+
+    _startReconnectTimer() {
+        if (this._reconnectTimer) return;
+        this.logger.info(`Reconnect watchdog: will force restart in ${this._reconnectDelay / 1000}s if still disconnected`);
+        this._reconnectTimer = setTimeout(async () => {
+            this._reconnectTimer = null;
+            if (this.connected) return;
+            this.logger.warn('Reconnect watchdog fired — forcing full restart of Bolt app');
+            try {
+                await this.app.stop();
+                await this.app.start();
+                this.connected = true;
+                this.logger.info('Bolt app restarted successfully');
+            } catch (err) {
+                this.logger.error(`Bolt app restart failed: ${err.message}`);
+            }
+        }, this._reconnectDelay);
+    }
+
+    _clearReconnectTimer() {
+        if (this._reconnectTimer) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
+    }
 
     _setupListeners() {
         this.app.event('app_mention', async ({ event, say }) => {
-            await this._handleMention(event, say);
+            try {
+                await this._handleMention(event, say);
+            } catch (err) {
+                if (err.message && (err.message.includes('no active connection') || err.message.includes('client is not ready'))) {
+                    this.logger.warn(`Mention handler failed (disconnected): ${err.message}`);
+                } else {
+                    throw err;
+                }
+            }
         });
+
+        // Listen for all messages in monitored channels
+        this.app.event('message', async ({ event }) => {
+            try {
+                await this._handleMonitoredMessage(event);
+            } catch (err) {
+                if (err.message && (err.message.includes('no active connection') || err.message.includes('client is not ready'))) {
+                    this.logger.warn(`Message handler failed (disconnected): ${err.message}`);
+                } else {
+                    throw err;
+                }
+            }
+        });
+    }
+
+    async _handleMonitoredMessage(event) {
+        // Filter out message edits and subtypes (joins, topic changes, etc.)
+        if (event.subtype) return;
+
+        const channelId = event.channel;
+        if (!this.alertMonitor.isMonitoredChannel(channelId)) return;
+
+        // Detect PagerDuty messages
+        if (!this.alertMonitor.isPagerDutyMessage(event)) return;
+
+        // Skip status notifications (Acknowledged, Resolved)
+        if (this.alertMonitor.isStatusNotification(event)) {
+            this.logger.info(`Skipping PD status notification in ${channelId}: ${(event.text || '').substring(0, 80)}`);
+            return;
+        }
+
+        const messageTs = event.ts;
+        const text = event.text || '';
+        const incidentId = this.alertMonitor.extractIncidentId(event);
+
+        this.logger.info(`PagerDuty alert detected in ${channelId}: incident=${incidentId || 'unknown'} ts=${messageTs}`);
+
+        const result = await this.alertWorkflow.startAlertWorkflow({
+            channelId,
+            messageTs,
+            text,
+            incidentId,
+            files: event.files
+        });
+
+        if (result.started) {
+            this.logger.info(`Alert workflow started for ${messageTs}`);
+        } else {
+            this.logger.info(`Alert workflow skipped for ${messageTs}: ${result.reason}`);
+        }
     }
 
     async _handleMention(event, say) {
@@ -176,10 +340,34 @@ class SlackSocketHandler {
             return;
         }
 
-        const text = rawText.replace(/<@[A-Z0-9]+>/g, '').trim();
+        let text = rawText.replace(/<@[A-Z0-9]+>/g, '').trim();
+
+        // Download any attached images and append file paths to the message
+        const imagePaths = await this._downloadSlackImages(event.files, `slack-${channelId}-${threadTs.replace('.', '')}`);
+        if (imagePaths.length > 0) {
+            const imageRef = `\nAttached images (read these files for visual context): ${imagePaths.join(' ')}`;
+            text = text ? text + imageRef : `Please analyze these images: ${imagePaths.join(' ')}`;
+        }
+
         if (!text) {
             await say({ text: 'Please provide a message after mentioning me.', thread_ts: threadTs });
             return;
+        }
+
+        // Check if this is an alert workflow thread
+        const alertThreadTs = event.thread_ts; // The root message ts of the thread
+        if (alertThreadTs && this.alertWorkflow.isActive(alertThreadTs)) {
+            if (text === '/exit') {
+                await this.alertWorkflow.handleExit(alertThreadTs);
+                await say({ text: 'Alert investigation session ended. :wave:', thread_ts: threadTs });
+                return;
+            }
+            // Forward follow-up messages to the alert workflow
+            const handled = await this.alertWorkflow.handleFollowUp(alertThreadTs, text);
+            if (handled) {
+                this.logger.info(`Follow-up forwarded to alert workflow: ${alertThreadTs}`);
+                return;
+            }
         }
 
         await this._processCommand(channelId, threadTs, text, say);
@@ -213,11 +401,52 @@ class SlackSocketHandler {
                 this._touchSession(sessionKey);
             } else {
                 // Brand new conversation
-                await say({ text: 'Starting Claude session... :rocket:', thread_ts: threadTs });
-
                 const sessionName = this._generateSessionName(channelId, threadTs);
-                const repoPath = this.config.repoPath || process.cwd();
                 const claudeCmd = this.config.claudeCommand || 'claude --dangerously-skip-permissions';
+
+                // Resolve repo path — check for project name patterns
+                // Supported: "start claude from root" (uses SLACK_REPO_ROOT directly),
+                //            "project XXX from root", "start claude from XXX project",
+                //            "start claude from XXX", "start claude in XXX project", etc.
+                let repoPath = this.config.repoPath || process.cwd();
+                const rootMatch = command.match(/start\s+claude\s+(?:from|in)\s+root\s*$/i);
+                const projectMatch = !rootMatch && (
+                    command.match(
+                        /(?:start\s+claude\s+(?:from|in)\s+)?project\s+(\S+)(?:\s+from\s+root)?/i
+                    ) || command.match(
+                        /start\s+claude\s+(?:from|in)\s+(\S+?)(?:\s+project)?\s*$/i
+                    )
+                );
+                if (rootMatch) {
+                    if (this.config.repoRoot) {
+                        repoPath = this.config.repoRoot;
+                        command = command.replace(/start\s+claude\s+(?:from|in)\s+root\s*$/i, '').trim();
+                        this.logger.info(`Using repo root: ${repoPath}`);
+                    } else {
+                        await say({ text: '`SLACK_REPO_ROOT` is not configured. Set it in `.env`.', thread_ts: threadTs });
+                        return;
+                    }
+                } else if (projectMatch && this.config.repoRoot) {
+                    const projectName = projectMatch[1];
+                    const candidatePath = path.join(this.config.repoRoot, projectName);
+                    if (fs.existsSync(candidatePath)) {
+                        repoPath = candidatePath;
+                        // Strip the project resolution part so Claude gets a clean prompt
+                        command = command
+                            .replace(/(?:start\s+claude\s+(?:from|in)\s+)?project\s+\S+(?:\s+from\s+root)?[,.]?\s*/i, '')
+                            .replace(/start\s+claude\s+(?:from|in)\s+\S+?(?:\s+project)?\s*$/i, '')
+                            .trim();
+                        this.logger.info(`Resolved project "${projectName}" to ${repoPath}`);
+                    } else {
+                        await say({ text: `Project folder not found: \`${candidatePath}\``, thread_ts: threadTs });
+                        return;
+                    }
+                } else if (projectMatch && !this.config.repoRoot) {
+                    await say({ text: '`SLACK_REPO_ROOT` is not configured. Set it in `.env` to use project switching.', thread_ts: threadTs });
+                    return;
+                }
+
+                await say({ text: `Starting Claude session in \`${repoPath}\`... :rocket:`, thread_ts: threadTs });
 
                 const created = await this._createTmuxSession(sessionName, repoPath, claudeCmd);
                 if (!created) {
@@ -293,7 +522,8 @@ class SlackSocketHandler {
         }
 
         return new Promise((resolve) => {
-            const cmd = `tmux new-session -d -s ${sessionName} -c "${repoPath}" "${claudeCmd}"`;
+            const { buildTmuxCommand } = require('../../utils/tmux-helper');
+            const cmd = buildTmuxCommand(sessionName, repoPath, claudeCmd);
             this.logger.info(`Creating tmux session: ${cmd}`);
 
             exec(cmd, (error) => {
@@ -359,14 +589,25 @@ class SlackSocketHandler {
             clearInterval(this.pollers.get(pollKey).interval);
         }
 
-        const baselineOutput = this._captureOutput(sessionName);
+        let baselineOutput = this._captureOutput(sessionName);
         let lastOutput = baselineOutput;
         let stableCount = 0;
         let attempts = 0;
-        const maxAttempts = 600; // 10 minutes
+        let processing = false;
+        const maxAttempts = 600; // 10 minutes per response cycle
         const stableThreshold = 3;
 
         const interval = setInterval(async () => {
+            if (processing) return;
+
+            // Stop if tmux session died
+            if (!this._isTmuxSessionAlive(sessionName)) {
+                clearInterval(interval);
+                this.pollers.delete(pollKey);
+                this.logger.info(`Poller stopped: tmux session ${sessionName} is dead`);
+                return;
+            }
+
             attempts++;
 
             if (attempts > maxAttempts) {
@@ -398,12 +639,15 @@ class SlackSocketHandler {
                            trimmed.includes('│ >') || trimmed.includes('│ ❯');
                 });
 
+                // Only check tail lines for working indicators — old history
+                // in the 200-line tmux buffer would cause false positives
+                const tailText = tailLines.join(' ');
                 const isWorking =
-                    currentOutput.includes('Clauding') ||
-                    currentOutput.includes('Working') ||
-                    currentOutput.includes('Processing') ||
-                    currentOutput.includes('⏳') ||
-                    currentOutput.includes('Thinking');
+                    tailText.includes('Clauding') ||
+                    tailText.includes('Working') ||
+                    tailText.includes('Processing') ||
+                    tailText.includes('⏳') ||
+                    tailText.includes('Thinking');
 
                 if (attempts % 10 === 0) {
                     const lastFiveLines = lines.slice(-5).map(l => l.trim()).join(' | ');
@@ -411,18 +655,27 @@ class SlackSocketHandler {
                 }
 
                 if (hasPrompt && !isWorking) {
-                    clearInterval(interval);
-                    this.pollers.delete(pollKey);
-
                     const response = this._extractResponse(baselineOutput, currentOutput);
-                    const sessionStats = this._extractSessionStats(currentOutput);
-                    this.logger.info(`Response extracted (${response ? response.length : 0} chars): "${(response || '').substring(0, 200)}"`);
+
                     if (response) {
-                        await this._sendResponse(say, threadTs, response, sessionStats);
-                        this.logger.info(`Response sent to Slack thread ${threadTs}`);
-                    } else {
-                        this.logger.warn(`No response extracted. Baseline lines: ${baselineOutput.split('\n').length}, Current lines: ${currentOutput.split('\n').length}`);
+                        processing = true;
+                        try {
+                            const sessionStats = this._extractSessionStats(currentOutput);
+                            this.logger.info(`Response extracted (${response.length} chars): "${response.substring(0, 200)}"`);
+                            await this._sendResponse(say, threadTs, response, sessionStats);
+                            this.logger.info(`Response sent to Slack thread ${threadTs}`);
+                        } catch (err) {
+                            this.logger.error(`Failed to send response to Slack: ${err.message}`);
+                        } finally {
+                            processing = false;
+                        }
                     }
+
+                    // Reset baseline and continue polling for local terminal input
+                    baselineOutput = currentOutput;
+                    lastOutput = currentOutput;
+                    stableCount = 0;
+                    attempts = 0;
                     return;
                 }
 
@@ -442,16 +695,53 @@ class SlackSocketHandler {
         const baseLines = baselineOutput.split('\n');
         const currentLines = currentOutput.split('\n');
 
-        let diffStart = 0;
-        for (let i = 0; i < Math.min(baseLines.length, currentLines.length); i++) {
-            if (baseLines[i] !== currentLines[i]) {
-                diffStart = i;
-                break;
-            }
-            diffStart = i + 1;
-        }
+        let newLines;
+        const bufferScrolled = baseLines.length > 0 && currentLines.length > 0 && baseLines[0] !== currentLines[0];
 
-        const newLines = currentLines.slice(diffStart);
+        if (!bufferScrolled) {
+            // Top-down diff: reliable when buffer hasn't scrolled (first lines match).
+            let diffStart = 0;
+            for (let i = 0; i < Math.min(baseLines.length, currentLines.length); i++) {
+                if (baseLines[i] !== currentLines[i]) {
+                    diffStart = i;
+                    break;
+                }
+                diffStart = i + 1;
+            }
+
+            if (diffStart < baseLines.length) {
+                newLines = currentLines.slice(diffStart);
+            } else if (currentLines.length > baseLines.length) {
+                newLines = currentLines.slice(baseLines.length);
+            } else {
+                newLines = []; // Identical output
+            }
+        } else {
+            // Buffer scrolled — use anchor-based diff.
+            // Find the last occurrence of baseline's tail in current output.
+            let baseTrimEnd = baseLines.length;
+            while (baseTrimEnd > 0 && baseLines[baseTrimEnd - 1].trim() === '') baseTrimEnd--;
+            const trimmedBaseLines = baseLines.slice(0, baseTrimEnd);
+
+            const anchorSize = Math.min(5, trimmedBaseLines.length);
+            const baselineTail = trimmedBaseLines.slice(-anchorSize);
+
+            let anchorEnd = -1;
+            for (let i = 0; i <= currentLines.length - anchorSize; i++) {
+                let match = true;
+                for (let j = 0; j < anchorSize; j++) {
+                    if (currentLines[i + j] !== baselineTail[j]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    anchorEnd = i + anchorSize;
+                }
+            }
+
+            newLines = anchorEnd >= 0 ? currentLines.slice(anchorEnd) : [];
+        }
         const responseLines = newLines.filter(line => {
             const trimmed = line.trim();
             if (!trimmed) return false;
@@ -472,17 +762,17 @@ class SlackSocketHandler {
         const stats = {};
         const lines = output.split('\n');
         for (const line of lines) {
-            // Match: Model: Opus 4.6⎇ mainCtx(u): 12.2% | In: 6Out: 26 | Cost: $0.24
+            // Match: Model: Opus 4.6⎇ mainCtx(u): 12.2% | In: 73Out: 1.9k | Cost: $0.24
             const modelMatch = line.match(/Model:\s*(.+?)(?:⎇|$)/);
             if (modelMatch) stats.model = modelMatch[1].trim();
 
             const ctxMatch = line.match(/Ctx\(u\):\s*([\d.]+%)/);
             if (ctxMatch) stats.context = ctxMatch[1];
 
-            const inMatch = line.match(/In:\s*([\d,]+)/);
+            const inMatch = line.match(/In:\s*([\d,.]+[kmb]?)/i);
             if (inMatch) stats.tokensIn = inMatch[1];
 
-            const outMatch = line.match(/Out:\s*([\d,]+)/);
+            const outMatch = line.match(/Out:\s*([\d,.]+[kmb]?)/i);
             if (outMatch) stats.tokensOut = outMatch[1];
 
             const costMatch = line.match(/Cost:\s*(\$[\d.]+)/);
@@ -510,7 +800,7 @@ class SlackSocketHandler {
     }
 
     async _sendResponse(say, threadTs, response, stats) {
-        const maxLen = 3900;
+        const maxLen = 2990; // Slack section block text limit is 3000 chars, minus ``` wrapping
         const statsLine = stats
             ? `\n_${stats.model || ''} · Ctx: ${stats.context || '?'} · In: ${stats.tokensIn || '?'} Out: ${stats.tokensOut || '?'}_`
             : '';
@@ -562,7 +852,7 @@ class SlackSocketHandler {
             },
             servers: [{ url: `http://localhost:${this.httpPort}` }],
             paths: {
-                '/health': {
+                '/': {
                     get: {
                         summary: 'Health check',
                         responses: {
@@ -587,6 +877,22 @@ class SlackSocketHandler {
                         }
                     }
                 },
+                '/trigger-alert': {
+                    post: {
+                        summary: 'Manually trigger an alert investigation workflow',
+                        requestBody: {
+                            required: true,
+                            content: { 'application/json': { schema: { type: 'object', required: ['url'], properties: { url: { type: 'string', example: 'https://wego.slack.com/archives/C07DEF456/p1709123456789012' } } } } }
+                        },
+                        responses: {
+                            '200': { description: 'Investigation started', content: { 'application/json': { schema: { type: 'object', properties: { status: { type: 'string' }, channelId: { type: 'string' }, messageTs: { type: 'string' } } } } } },
+                            '400': { description: 'Missing/invalid URL or bad JSON' },
+                            '405': { description: 'Wrong HTTP method' },
+                            '409': { description: 'Workflow already active for this message' },
+                            '503': { description: 'Slack app not initialized yet' }
+                        }
+                    }
+                },
                 '/sessions': {
                     get: {
                         summary: 'List active Claude tmux sessions',
@@ -604,12 +910,13 @@ class SlackSocketHandler {
         const swaggerUi = require('swagger-ui-express');
         httpApp.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc));
 
-        httpApp.get('/health', (req, res) => {
+        httpApp.get('/', (req, res) => {
             const sessions = this._getAllSessions();
             const aliveSessions = sessions.filter(s => this._isTmuxSessionAlive(s.sessionName));
             res.json({
-                status: 'ok',
+                status: this.connected ? 'ok' : 'degraded',
                 service: 'claude-code-remote-slack',
+                socketConnected: this.connected,
                 uptime: process.uptime(),
                 sessions: aliveSessions.length,
                 totalSessionsInDb: sessions.length
@@ -638,6 +945,70 @@ class SlackSocketHandler {
                 res.json({ ok: true, channel: parsed.channel, ts: parsed.ts });
             } catch (error) {
                 this.logger.error('Failed to delete message:', error.message);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // ─── Trigger Alert ─────────────────────────────────────
+        httpApp.post('/trigger-alert', async (req, res) => {
+            if (!this.app) {
+                return res.status(503).json({ error: 'Slack app not initialized yet' });
+            }
+
+            const { url } = req.body || {};
+            if (!url || typeof url !== 'string') {
+                return res.status(400).json({ error: 'Missing or invalid "url" field. Provide a Slack message permalink.' });
+            }
+
+            const parsed = AlertWorkflow.parseSlackUrl(url);
+            if (!parsed) {
+                return res.status(400).json({ error: 'Invalid Slack message URL format. Expected: https://<workspace>.slack.com/archives/<channel>/p<timestamp>' });
+            }
+
+            const { channelId, messageTs } = parsed;
+            this.logger.info(`Trigger-alert received: channelId=${channelId} messageTs=${messageTs}`);
+
+            // Check for duplicate
+            if (this.alertWorkflow.isActive(messageTs)) {
+                this.logger.info(`Trigger-alert blocked: workflow already active for messageTs=${messageTs}`);
+                return res.status(409).json({ error: 'Workflow already active for this message', channelId, messageTs });
+            }
+
+            try {
+                // Fetch the message from Slack
+                const historyResult = await this.app.client.conversations.history({
+                    channel: channelId,
+                    latest: messageTs,
+                    inclusive: true,
+                    limit: 1
+                });
+
+                const message = historyResult.messages?.[0];
+                if (!message) {
+                    return res.status(400).json({ error: 'Could not fetch message from Slack' });
+                }
+
+                const text = message.text || '';
+                const incidentId = this.alertMonitor.extractIncidentId(message);
+
+                const result = await this.alertWorkflow.startAlertWorkflow({
+                    channelId,
+                    messageTs,
+                    text,
+                    incidentId,
+                    force: true,
+                    files: message.files
+                });
+
+                if (result.started) {
+                    this.logger.info(`Trigger-alert started workflow for messageTs=${messageTs}`);
+                    res.json({ status: 'investigating', channelId, messageTs });
+                } else {
+                    this.logger.info(`Trigger-alert workflow not started: ${result.reason} for messageTs=${messageTs}`);
+                    res.status(409).json({ status: result.reason, channelId, messageTs });
+                }
+            } catch (error) {
+                this.logger.error(`Trigger alert error: ${error.message}`);
                 res.status(500).json({ error: error.message });
             }
         });
@@ -673,19 +1044,36 @@ class SlackSocketHandler {
     // ─── Lifecycle ───────────────────────────────────────────────────
 
     async start() {
+        const t0 = Date.now();
+
         // Reconcile DB sessions with live tmux sessions
         this._reconcileSessions();
+        this.logger.info(`[startup] reconcileSessions: ${Date.now() - t0}ms`);
 
+        const t1 = Date.now();
         await this.app.start();
-        this.logger.info('Slack Socket Mode connected');
+        this.connected = true;
+        this._setupConnectionMonitor();
+        this.logger.info(`[startup] Slack Socket Mode connected: ${Date.now() - t1}ms`);
+
+        // Resolve monitored channels and recover alert workflows
+        const t2 = Date.now();
+        await this.alertMonitor.resolveMonitorChannels();
+        this.logger.info(`[startup] resolveMonitorChannels: ${Date.now() - t2}ms`);
+
+        const t3 = Date.now();
+        await this.alertWorkflow.recoverWorkflows();
+        this.logger.info(`[startup] recoverWorkflows: ${Date.now() - t3}ms`);
 
         this.httpServer = this._httpApp.listen(this.httpPort, () => {
-            this.logger.info(`HTTP API server started on port ${this.httpPort}`);
-            this.logger.info(`Swagger docs: http://localhost:${this.httpPort}/docs`);
+            this.logger.info(`[startup] HTTP API on port ${this.httpPort}`);
+            this.logger.info(`[startup] total: ${Date.now() - t0}ms`);
         });
     }
 
     async stop() {
+        this._clearReconnectTimer();
+
         if (this.httpServer) {
             this.httpServer.close();
         }
@@ -697,6 +1085,13 @@ class SlackSocketHandler {
 
         // NOTE: We do NOT kill tmux sessions on stop.
         // They persist so conversations can resume after restart.
+
+        // Clean up alert workflow timers (but preserve tmux sessions for recovery)
+        if (this.alertWorkflow) {
+            for (const [, wf] of this.alertWorkflow.activeWorkflows) {
+                if (wf.feedbackTimer) clearTimeout(wf.feedbackTimer);
+            }
+        }
 
         if (this.db) {
             this.db.close();

@@ -10,7 +10,7 @@ class Logger {
     }
 
     _log(level, message, ...args) {
-        const timestamp = new Date().toISOString();
+        const timestamp = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok', hour12: false }).replace(' ', 'T');
         const prefix = `[${timestamp}] [${this.namespace}] [${level.toUpperCase()}]`;
         
         if (this._shouldLog(level)) {

@@ -45,7 +45,8 @@ class TmuxInjector {
     async createClaudeSession() {
         return new Promise((resolve) => {
             // Use clauderun command to start Claude (without pre-filling any commands)
-            const command = `tmux new-session -d -s ${this.sessionName} -c "${process.cwd()}" clauderun`;
+            const { buildTmuxCommand } = require('../utils/tmux-helper');
+            const command = buildTmuxCommand(this.sessionName, process.cwd(), 'clauderun');
             
             this.log.info(`Creating tmux session with clauderun command: ${command}`);
             
@@ -54,7 +55,7 @@ class TmuxInjector {
                     this.log.warn(`Failed to create tmux session with clauderun: ${error.message}`);
                     // If clauderun fails, try using full path command
                     this.log.info('Fallback to full path command...');
-                    const fallbackCommand = `tmux new-session -d -s ${this.sessionName} -c "${process.cwd()}" /Users/jessytsui/.nvm/versions/node/v18.17.0/bin/claude --dangerously-skip-permissions`;
+                    const fallbackCommand = buildTmuxCommand(this.sessionName, process.cwd(), 'claude --dangerously-skip-permissions');
                     
                     exec(fallbackCommand, (fallbackError) => {
                         if (fallbackError) {
@@ -87,7 +88,7 @@ class TmuxInjector {
                 
                 // 2. Send command
                 const escapedCommand = command.replace(/'/g, "'\"'\"'");
-                const sendCommand = `tmux send-keys -t ${this.sessionName} '${escapedCommand}'`;
+                const sendCommand = `tmux send-keys -t ${this.sessionName} -l '${escapedCommand}'`;
                 
                 // 3. Send enter
                 const enterCommand = `tmux send-keys -t ${this.sessionName} C-m`;
