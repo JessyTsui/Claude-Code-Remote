@@ -1,91 +1,27 @@
 # Claude Code Remote
 
-Control [Claude Code](https://claude.ai/code) remotely via multiple messaging platforms. Start tasks locally, receive notifications when Claude completes them, and send new commands by simply replying to messages.
+Control [Claude Code](https://claude.ai/code) remotely via Slack. Start tasks locally or from Slack, receive notifications when Claude completes them, and send new commands by replying in the thread. All sessions run in tmux.
 
-**Supported Platforms:**
-- 📧 **Email** - Traditional SMTP/IMAP integration with execution trace
-- 📱 **Telegram** - Interactive bot with smart buttons ✅ **NEW**
-- 💬 **LINE** - Rich messaging with token-based commands
-- 🖥️ **Desktop** - Sound alerts and system notifications
+## Features
 
-<div align="center">
-  
-  ### 🎥 Watch Demo Video
-  
-  <a href="https://youtu.be/_yrNlDYOJhw">
-    <img src="./assets/CCRemote_demo.png" alt="Claude Code Remote Demo" width="100%">
-    <br>
-    <img src="https://img.shields.io/badge/▶-Watch%20on%20YouTube-red?style=for-the-badge&logo=youtube" alt="Watch on YouTube">
-  </a>
-  
-</div>
+- **Two-way Slack control** — @mention the bot with commands, get responses streamed back to the thread
+- **Tmux session management** — Each Slack thread gets its own tmux session with Claude running
+- **Hook-based notifications** — Claude Code Stop/SubagentStop hooks post to the correct Slack thread automatically
+- **PagerDuty alert monitoring** — Watch Slack channels for PD alerts, auto-start Claude investigation sessions
+- **Session persistence** — SQLite-backed sessions survive bot restarts; dead sessions auto-reconcile on startup
+- **HTTP API** — Health check, Swagger docs, and management endpoints at `localhost:9999`
+- **Image support** — Attach images to Slack messages and they're passed to Claude
+- **User whitelist** — Restrict who can interact with the bot
 
-> 🐦 Follow [@Jiaxi_Cui](https://x.com/Jiaxi_Cui) for updates and AI development insights
+## Quick Start
 
-## ✨ Features
+### Prerequisites
 
-- **📧 Multiple Messaging Platforms**: 
-  - Email notifications with full execution trace and reply-to-send commands ![](./assets/email_demo.png)
-  - Telegram Bot with interactive buttons and slash commands ![](./assets/telegram_demo.png)
-  - LINE messaging with token-based commands
-  - Desktop notifications with sound alerts
-- **🔄 Two-way Control**: Reply to messages or emails to send new commands
-- **📱 Remote Access**: Control Claude from anywhere
-- **🔒 Secure**: ID-based whitelist verification for all platforms
-- **👥 Group Support**: Use in LINE groups or Telegram groups for team collaboration
-- **🤖 Smart Commands**: Intuitive command formats for each platform
-- **📋 Multi-line Support**: Send complex commands with formatting
-- **⚡ Smart Monitoring**: Intelligent detection of Claude responses with historical tracking
-- **🔄 tmux Integration**: Seamless command injection into active tmux sessions
-- **📊 Execution Trace**: Full terminal output capture in email notifications
-
-## 📅 Changelog
-
-### August 2025
-- **2025-08-02**: Add full execution trace to email notifications ([#14](https://github.com/JessyTsui/Claude-Code-Remote/pull/14) by [@vaclisinc](https://github.com/vaclisinc))
-- **2025-08-01**: Enhanced Multi-Channel Notification System ([#1](https://github.com/JessyTsui/Claude-Code-Remote/pull/1) by [@laihenyi](https://github.com/laihenyi) [@JessyTsui](https://github.com/JessyTsui))
-  - ✅ **Telegram Integration Completed** - Interactive buttons, real-time commands, smart personal/group chat handling
-  - ✅ **Multi-Channel Notifications** - Simultaneous delivery to Desktop, Telegram, Email, LINE
-  - ✅ **Smart Sound Alerts** - Always-on audio feedback with customizable sounds
-  - ✅ **Intelligent Session Management** - Auto-detection, real conversation content, 24-hour tokens
-- **2025-08-01**: Fix #9 #12: Add configuration to disable subagent notifications ([#10](https://github.com/JessyTsui/Claude-Code-Remote/pull/10) by [@vaclisinc](https://github.com/vaclisinc))
-- **2025-08-01**: Implement terminal-style UI for email notifications ([#8](https://github.com/JessyTsui/Claude-Code-Remote/pull/8) by [@vaclisinc](https://github.com/vaclisinc))
-- **2025-08-01**: Fix working directory issue - enable claude-remote to run from any directory ([#7](https://github.com/JessyTsui/Claude-Code-Remote/pull/7) by [@vaclisinc](https://github.com/vaclisinc))
-
-### July 2025
-- **2025-07-31**: Fix self-reply loop issue when using same email for send/receive ([#4](https://github.com/JessyTsui/Claude-Code-Remote/pull/4) by [@vaclisinc](https://github.com/vaclisinc))
-- **2025-07-28**: Remove hardcoded values and implement environment-based configuration ([#2](https://github.com/JessyTsui/Claude-Code-Remote/pull/2) by [@kevinsslin](https://github.com/kevinsslin))
-
-## 📋 TODO List
-
-### Notification Channels
-- ~~**📱 Telegram Integration**~~ ✅ **COMPLETED** - Bot integration with interactive buttons and real-time commands
-- **💬 Discord Integration** - Bot integration for messaging platforms
-- **⚡ Slack Workflow** - Native Slack app with slash commands
-
-### Developer Tools
-- **🤖 AI Tools Support** - Integration with Gemini CLI, Cursor, and other AI development tools
-- **🔀 Git Automation** - Auto-commit functionality, PR creation, branch management
-
-### Usage Analytics
-- **💰 Cost Tracking** - Token usage monitoring and estimated costs
-- **⚡ Performance Metrics** - Execution time tracking and resource usage analysis
-- **📧 Scheduled Reports** - Daily/weekly usage summaries delivered via email
-
-### Native Apps
-- **📱 Mobile Apps** - iOS and Android applications for remote Claude control
-- **🖥️ Desktop Apps** - macOS and Windows native clients with system integration
-
-## 🚀 Quick Start
-
-### 1. Prerequisites
-
-**System Requirements:**
 - Node.js >= 14.0.0
-- For default PTY mode: no tmux required (recommended for local use)
-- For tmux mode: tmux + an active session with Claude Code running
+- tmux installed
+- A Slack app with Socket Mode enabled (bot token + app-level token)
 
-### 2. Install
+### Install
 
 ```bash
 git clone https://github.com/JessyTsui/Claude-Code-Remote.git
@@ -93,396 +29,193 @@ cd Claude-Code-Remote
 npm install
 ```
 
-### 3. Interactive Setup (Recommended)
+### Setup
 
 ```bash
 npm run setup
 ```
 
-- Guided setup for Email / Telegram / LINE configuration, generates `.env`
-- Automatically merges Claude hooks into `~/.claude/settings.json`
-- Can be re-run anytime to update keys or switch channels
-- For manual configuration or offline `.env` editing, see “Manual Configuration” below
+The interactive wizard will:
+1. Prompt for Slack tokens, channel ID, repo path, etc.
+2. Generate `.env`
+3. Merge Claude hooks into `~/.claude/settings.json`
 
-### 4. Manual Configuration (optional, skip if you ran `npm run setup`)
+You can re-run it anytime to update settings.
 
-#### Option A: Configure Email (Recommended for Beginners)
+### Manual Configuration (optional)
 
 ```bash
-# Copy example config
 cp .env.example .env
-
-# Edit with your email credentials
 nano .env
 ```
 
-**Required email settings:**
+Required settings:
+
 ```env
-EMAIL_ENABLED=true
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
-IMAP_USER=your-email@gmail.com  
-IMAP_PASS=your-app-password
-EMAIL_TO=your-notification-email@gmail.com
-ALLOWED_SENDERS=your-notification-email@gmail.com
-SESSION_MAP_PATH=/your/path/to/Claude-Code-Remote/src/data/session-map.json
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_APP_TOKEN=xapp-your-app-token
+SLACK_CHANNEL_ID=C0123456789
 ```
 
-📌 **Gmail users**: Use [App Passwords](https://myaccount.google.com/security), not your regular password.
+Optional settings:
 
-#### Option B: Configure Telegram ✅ **NEW**
-
-**Quick Setup:**
-```bash
-chmod +x setup-telegram.sh
-./setup-telegram.sh
-```
-
-**Manual Setup:**
-1. Create bot via [@BotFather](https://t.me/BotFather)
-2. Get your Chat ID from bot API
-3. Configure webhook URL (use ngrok for local testing)
-
-**Required Telegram settings:**
 ```env
-TELEGRAM_ENABLED=true
-TELEGRAM_BOT_TOKEN=your-bot-token-here
-TELEGRAM_CHAT_ID=your-chat-id-here
-TELEGRAM_WEBHOOK_URL=https://your-ngrok-url.app
-SESSION_MAP_PATH=/your/path/to/Claude-Code-Remote/src/data/session-map.json
-```
+# Working directory for Claude sessions
+SLACK_REPO_PATH=/Users/you/your-project
 
-**Optional Telegram settings:**
-```env
-# Force IPv4 connections to Telegram API (default: false)
-# Enable this if you experience connectivity issues with IPv6
-TELEGRAM_FORCE_IPV4=true
-```
+# Root for project discovery ("start claude in project X from root")
+SLACK_REPO_ROOT=/Users/you/projects
 
-**Network Configuration Notes:**
-- **IPv4 vs IPv6**: Some network environments may have unstable IPv6 connectivity to Telegram's API servers
-- **When to use `TELEGRAM_FORCE_IPV4=true`**:
-  - Connection timeouts or failures when sending messages
-  - Inconsistent webhook delivery
-  - Network environments that don't properly support IPv6
-- **Default behavior**: Uses system default (usually IPv6 when available, fallback to IPv4)
-- **Performance impact**: Minimal - only affects initial connection establishment
+# Custom Claude launch command
+SLACK_CLAUDE_COMMAND=claude --dangerously-skip-permissions
 
-#### Option C: Configure LINE
+# Authorized Slack user IDs (comma-separated, empty = all users)
+SLACK_WHITELIST=U0123456789,U9876543210
 
-**Required LINE settings:**
-```env
-LINE_ENABLED=true
-LINE_CHANNEL_ACCESS_TOKEN=your-token
-LINE_CHANNEL_SECRET=your-secret
-LINE_USER_ID=your-user-id
+# HTTP API port (default: 9999)
+SLACK_HTTP_PORT=9999
+
+# Daily Socket Mode restart hour (0-23, helps maintain clean connection)
+DAILY_RESTART_HOUR=23
 ```
 
 #### Configure Claude Code Hooks (only needed if you skipped `npm run setup`)
 
-Create hooks configuration file:
+Add to `~/.claude/settings.json`:
 
-**Method 1: Global Configuration (Recommended)**
-```bash
-# Add to ~/.claude/settings.json
+```json
 {
   "hooks": {
-    "Stop": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "node /your/path/to/Claude-Code-Remote/claude-hook-notify.js completed",
-        "timeout": 5
-      }]
-    }],
-    "SubagentStop": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "node /your/path/to/Claude-Code-Remote/claude-hook-notify.js waiting",
-        "timeout": 5
-      }]
-    }]
+    "Stop": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /path/to/Claude-Code-Remote/claude-hook-notify.js completed", "timeout": 5 }] }],
+    "SubagentStop": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /path/to/Claude-Code-Remote/claude-hook-notify.js waiting", "timeout": 5 }] }]
   }
 }
 ```
 
-**Method 2: Project-Specific Configuration**
+### Start
+
 ```bash
-# Set environment variable
-export CLAUDE_HOOKS_CONFIG=/your/path/to/Claude-Code-Remote/claude-hooks.json
+npm run slack
 ```
 
-> **Note**: Subagent notifications are disabled by default. To enable them, set `enableSubagentNotifications: true` in your config. See [Subagent Notifications Guide](./docs/SUBAGENT_NOTIFICATIONS.md) for details.
+Or use the service wrapper:
 
-### 5. Start Claude (choose based on your injection mode)
-
-- **Default PTY mode (no tmux required)**: Run `claude-code --config /path/to/your/claude/settings.json` directly in your terminal
-- **If you chose tmux mode**:
-  ```bash
-  tmux new-session -d -s claude-session
-  tmux attach-session -t claude-session
-  claude-code --config /path/to/your/claude/settings.json
-  ```
-  > Detach: Ctrl+B then D
-
-> **Note**: Interactive setup has already merged hooks into `~/.claude/settings.json`. If you skipped it, make sure to configure hooks manually.
-
-### 6. Start Services
-
-#### For All Platforms (Recommended)
 ```bash
-# Automatically starts all enabled platforms
-npm run webhooks
-# or
-node start-all-webhooks.js
+./start.sh start    # Start in background
+./start.sh stop     # Graceful shutdown
+./start.sh restart  # Restart
+./start.sh status   # Show status + recent logs
+./start.sh logs     # Tail logs
 ```
 
-#### For Individual Platforms
+### Test
 
-**For Email:**
 ```bash
-npm run daemon:start
-# or
-node claude-remote.js daemon start
-```
-
-**For Telegram:**
-```bash
-npm run telegram
-# or
-node start-telegram-webhook.js
-```
-
-**For LINE:**
-```bash
-npm run line
-# or
-node start-line-webhook.js
-```
-
-### 7. Test Your Setup
-
-**Quick Test:**
-```bash
-# Test all notification channels
+# Test hook notification (sends to Slack)
 node claude-hook-notify.js completed
-# Should receive notifications via all enabled platforms
 ```
 
-**Full Test:**
-1. Start Claude in tmux session with hooks enabled
-2. Run any command in Claude
-3. Check for notifications (email/Telegram/LINE)
-4. Reply with new command to test two-way control
+## How It Works
 
-## 🎮 How It Works
+1. **@mention the bot** in any Slack channel with a command
+2. Bot creates a tmux session with Claude running in your configured repo
+3. Command is injected into the tmux session
+4. Bot polls tmux output and streams new lines back to the Slack thread
+5. When Claude finishes, hooks fire and post a notification to the thread
+6. **Reply in the thread** to continue the conversation
 
-1. **Use Claude normally** in tmux session
-2. **Get notifications** when Claude completes tasks via:
-   - 🔊 **Sound alert** (Desktop)
-   - 📧 **Email notification with execution trace** (if enabled)
-   - 📱 **Telegram message with buttons** (if enabled)
-   - 💬 **LINE message** (if enabled)
-3. **Reply with commands** using any platform
-4. **Commands execute automatically** in Claude
+### Alert Monitoring (optional)
 
-### Platform Command Formats
+Configure PagerDuty alert monitoring to auto-investigate incidents:
 
-**Email:**
-```
-Simply reply to notification email with your command
-No special formatting required
+```env
+MONITOR_CHANNELS=payments-alerts,incidents
+ALERT_SKILL=one:pay-ops-production
+PAGERDUTY_API_TOKEN=your-token
+PAGERDUTY_FROM_EMAIL=your-email@company.com
+ALERT_FEEDBACK_TIMEOUT_MS=300000
 ```
 
-**Telegram:** ✅ **NEW**
-```
-Click smart button to get format:
-📝 Personal Chat: /cmd TOKEN123 your command here
-👥 Group Chat: @bot_name /cmd TOKEN123 your command here
-```
+When a PagerDuty alert appears in a monitored channel:
+1. Bot reacts with eyes emoji and auto-acknowledges the PD incident
+2. Starts a Claude session with the configured alert skill
+3. Posts investigation results back to the alert thread
+4. On `/exit` or cleanup, swaps eyes to checkmark
 
-**LINE:**
-```
-Reply to notification with: Your command here
-(Token automatically extracted from conversation context)
-```
+## Architecture
 
-**Local fallback (no tmux)**
-- Default `INJECTION_MODE=pty`: commands are injected via PTY/smart paste, no tmux dependency
-- On macOS, auto copy/paste to Claude/terminal; if auto-injection fails, the command is copied to clipboard with a reminder notification
+See [`docs/architecture.md`](./docs/architecture.md) for detailed data flow diagrams, class references, and the full file map.
 
-### Advanced Configuration
+### Key Files
 
-**Email Notification Options**
+| File | Purpose |
+|------|---------|
+| `start-slack-socket.js` | Server launcher (Socket Mode) |
+| `claude-hook-notify.js` | Hook entry point (Stop/SubagentStop -> Slack) |
+| `claude-remote.js` | CLI: `notify`, `test`, `status`, `config` |
+| `setup.js` | Interactive setup wizard |
+| `src/channels/slack/socket.js` | Main runtime — manages sessions, polling, alerts |
+| `src/channels/slack/alert-monitor.js` | PagerDuty detection in monitored channels |
+| `src/relay/tmux-injector.js` | tmux command injection |
+| `src/data/slack-sessions.db` | SQLite session persistence |
 
-1. **Subagent Activities in Email**
+## Troubleshooting
 
-   By default, email notifications only show the execution trace. You can optionally enable a separate subagent activities summary section:
+**Bot not responding to @mentions?**
+- Verify `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are set correctly
+- Ensure the Slack app has Socket Mode enabled
+- Check the bot is invited to the channel
+- If using whitelist, verify your Slack user ID is included
 
-   ```json
-   // In your config/config.json
-   {
-     "showSubagentActivitiesInEmail": true  // Default: false
-   }
-   ```
-
-   When enabled, emails will include:
-   - **Subagent Activities Summary**: A structured list of all subagent activities
-   - **Full Execution Trace**: The complete terminal output
-
-   Since the execution trace already contains all information, this feature is disabled by default to keep emails concise.
-
-2. **Execution Trace Display**
-
-   You can control whether to include the execution trace in email notifications:
-
-   ```json
-   // In your email channel configuration
-   {
-     "email": {
-       "config": {
-         "includeExecutionTrace": false  // Default: true
-       }
-     }
-   }
-   ```
-
-   - When `true` (default): Shows a scrollable execution trace section in emails
-   - When `false`: Removes the execution trace section entirely from emails
-
-   This is useful if you find the execution trace too verbose or if your email client has issues with scrollable content.
-
-## 💡 Use Cases
-
-- **Remote Code Reviews**: Start reviews at office, continue from home via any platform
-- **Long-running Tasks**: Monitor progress and guide next steps remotely
-- **Multi-location Development**: Control Claude from anywhere without VPN
-- **Team Collaboration**: Share Telegram groups for team notifications
-- **Mobile Development**: Send commands from phone via Telegram
-
-## 🔧 Commands
-
-### Setup
+**Hook notifications not appearing?**
 ```bash
-npm run setup   # Interactive wizard to create .env and merge hooks into ~/.claude/settings.json
-```
-
-### Testing & Diagnostics
-```bash
-# Test all notification channels
+# Test the hook directly
 node claude-hook-notify.js completed
 
-# Test specific platforms
-node test-telegram-notification.js
-node test-real-notification.js
-node test-injection.js
-
-# System diagnostics
-node claude-remote.js diagnose
-node claude-remote.js status
-node claude-remote.js test
-```
-
-### Service Management
-```bash
-# Start all enabled platforms
-npm run webhooks
-
-# Individual services
-npm run telegram         # Telegram webhook
-npm run line            # LINE webhook  
-npm run daemon:start    # Email daemon
-
-# Stop services
-npm run daemon:stop     # Stop email daemon
-```
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-**Not receiving notifications from Claude?**
-1. Check hooks configuration in tmux session:
-   ```bash
-   echo $CLAUDE_HOOKS_CONFIG
-   ```
-2. Verify Claude is running with hooks enabled
-3. Test notification manually:
-   ```bash
-   node claude-hook-notify.js completed
-   ```
-
-**Telegram bot not responding?** ✅ **NEW**
-```bash
-# Test bot connectivity
-curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-  -H "Content-Type: application/json" \
-  -d "{\"chat_id\": $TELEGRAM_CHAT_ID, \"text\": \"Test\"}"
-
-# Check webhook status
-curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
-```
-
-**Commands not executing in Claude?**
-```bash
-# Check tmux session exists
+# Check Claude is running in a tmux session that the hook can find
 tmux list-sessions
-
-# Verify injection mode
-grep INJECTION_MODE .env  # Should be 'tmux'
-
-# Test injection
-node test-injection.js
 ```
 
-**Not receiving emails?**
-- Run `node claude-remote.js test` to test email setup
-- Check spam folder
-- Verify SMTP settings in `.env`
-- For Gmail: ensure you're using App Password
-
-### Debug Mode
+**Commands not executing?**
 ```bash
-# Enable detailed logging
-LOG_LEVEL=debug npm run webhooks
-DEBUG=true node claude-hook-notify.js completed
+# Verify tmux is available
+which tmux
+
+# Check for active sessions
+tmux list-sessions
 ```
 
-## 🛡️ Security
+**Debug mode:**
+```bash
+LOG_LEVEL=debug npm run slack
+```
 
-### Multi-Platform Authentication
-- ✅ **Email**: Sender whitelist via `ALLOWED_SENDERS` environment variable
-- ✅ **Telegram**: Bot token and chat ID verification
-- ✅ **LINE**: Channel secret and access token validation
-- ✅ **Session Tokens**: 8-character alphanumeric tokens for command verification
+## Commands
 
-### Session Security
-- ✅ **Session Isolation**: Each token controls only its specific tmux session
-- ✅ **Auto Expiration**: Sessions timeout automatically after 24 hours
-- ✅ **Token-based Commands**: All platforms require valid session tokens
-- ✅ **Minimal Data Storage**: Session files contain only necessary information
+```bash
+npm run setup   # Interactive setup wizard
+npm run slack   # Start Slack Socket Mode bot
+```
 
-## 🤝 Contributing
+**CLI:**
+```bash
+node claude-remote.js notify --type completed   # Send notification
+node claude-remote.js test                      # Test notification channels
+node claude-remote.js status                    # Show config and status
+node claude-remote.js config                    # Interactive config manager
+```
 
-Found a bug or have a feature request? 
+## Security
 
-- 🐛 **Issues**: [GitHub Issues](https://github.com/JessyTsui/Claude-Code-Remote/issues)
-- 🐦 **Updates**: Follow [@Jiaxi_Cui](https://x.com/Jiaxi_Cui) on Twitter
-- 💬 **Discussions**: Share your use cases and improvements
+- **Slack auth** — Bot token + app token required for Socket Mode
+- **User whitelist** — `SLACK_WHITELIST` restricts who can send commands
+- **Session isolation** — Each thread gets its own tmux session
+- **Auto-cleanup** — Sessions older than 7 days are automatically removed
 
-## 📄 License
+## License
 
-MIT License - Feel free to use and modify!
+MIT License
 
 ---
 
-**🚀 Make Claude Code truly remote and accessible from anywhere!**
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=JessyTsui/Claude-Code-Remote&type=Date)](https://star-history.com/#JessyTsui/Claude-Code-Remote&Date)
-
-⭐ **Star this repo** if it helps you code more efficiently!
-
-> 💡 **Tip**: Enable multiple notification channels for redundancy - never miss a Claude completion again!
+Follow [@Jiaxi_Cui](https://x.com/Jiaxi_Cui) for updates.
