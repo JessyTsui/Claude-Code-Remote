@@ -470,7 +470,11 @@ class SlackSocketHandler {
         if (alertThreadTs && this.alertWorkflow.isActive(alertThreadTs)) {
             if (text === '/exit') {
                 await this.alertWorkflow.handleExit(alertThreadTs);
-                await say({ text: 'Alert investigation session ended. :wave:', thread_ts: threadTs });
+                await this.app.client.reactions.add({
+                    channel: channelId,
+                    timestamp: event.ts,
+                    name: 'white_check_mark',
+                });
                 return;
             }
             // Forward follow-up messages to the alert workflow
@@ -614,7 +618,11 @@ class SlackSocketHandler {
                     clearInterval(this.pollers.get(pollKey).interval);
                     this.pollers.delete(pollKey);
                 }
-                await say({ text: 'Claude session ended. :wave:', thread_ts: threadTs });
+                await this.app.client.reactions.add({
+                    channel: channelId,
+                    timestamp: event.ts,
+                    name: 'white_check_mark',
+                });
                 return;
             }
 

@@ -798,8 +798,17 @@ class AlertWorkflow {
             updated_at: Date.now()
         });
 
-        wf.feedbackTimer = setTimeout(() => {
+        wf.feedbackTimer = setTimeout(async () => {
             this.logger.info(`Feedback timeout for ${messageTs} — cleaning up`);
+            try {
+                await this.app.client.reactions.add({
+                    channel: wf.channelId,
+                    timestamp: messageTs,
+                    name: 'white_check_mark',
+                });
+            } catch (e) {
+                this.logger.warn(`Failed to add timeout reaction: ${e.message}`);
+            }
             this._cleanup(messageTs);
         }, timeoutMs);
 
