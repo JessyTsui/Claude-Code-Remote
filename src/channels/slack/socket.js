@@ -1036,6 +1036,20 @@ class SlackSocketHandler {
                         }
                     }
                 },
+                '/remove-reaction': {
+                    post: {
+                        summary: 'Remove all bot reactions from a Slack message',
+                        requestBody: {
+                            required: true,
+                            content: { 'application/json': { schema: { type: 'object', required: ['url'], properties: { url: { type: 'string', example: 'https://wego.slack.com/archives/C0AJ3JPRA9L/p1772808507330479?thread_ts=1772802618.748569&cid=C0AJ3JPRA9L' } } } } }
+                        },
+                        responses: {
+                            '200': { description: 'Reactions removed successfully', content: { 'application/json': { schema: { type: 'object', properties: { ok: { type: 'boolean' }, channel: { type: 'string' }, ts: { type: 'string' }, removed: { type: 'array', items: { type: 'string' } } } } } } },
+                            '400': { description: 'Missing or invalid URL' },
+                            '500': { description: 'Failed to remove reactions' }
+                        }
+                    }
+                },
                 '/trigger-alert': {
                     post: {
                         summary: 'Manually trigger an alert investigation workflow',
