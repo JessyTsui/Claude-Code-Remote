@@ -446,9 +446,17 @@ class SlackSocketHandler {
                     return;
                 }
 
+                // If command was fully consumed by project pattern, default to "hi"
+                if (!command) {
+                    command = 'hi';
+                }
+
+                // Pass --cwd so Claude CLI knows its working directory
+                const fullClaudeCmd = `${claudeCmd} --cwd "${repoPath}"`;
+
                 await say({ text: `Starting Claude session in \`${repoPath}\`... :rocket:`, thread_ts: threadTs });
 
-                const created = await this._createTmuxSession(sessionName, repoPath, claudeCmd);
+                const created = await this._createTmuxSession(sessionName, repoPath, fullClaudeCmd);
                 if (!created) {
                     await say({ text: 'Failed to create Claude session. Is tmux installed?', thread_ts: threadTs });
                     return;
