@@ -57,7 +57,6 @@ Plugin architecture with a base class at `src/channels/base/channel.js`. Only Sl
 
 All state is file-based:
 - `slack-sessions.db` — SQLite DB mapping session keys to tmux sessions, channels, and threads. Alert sessions have `alert_message_ts` set for reaction management (👀 → ✅).
-- `session-map.json` — Maps 8-char session tokens to execution contexts (24h auto-expiry)
 
 ### Execution Flow (Regular)
 
@@ -93,7 +92,7 @@ Environment variables in `.env` (see `.env.example`):
 - **Alert Monitoring**: `MONITOR_CHANNELS`, `ALERT_SKILL`, `PAGERDUTY_API_TOKEN`, `PAGERDUTY_FROM_EMAIL`
 - **Daily Summary**: `DAILY_SUMMARY_CHANNELS`, `DAILY_SUMMARY_TIME`, `DAILY_SUMMARY_MODEL`, `SLACK_XOXC_TOKEN`, `SLACK_XOXD_TOKEN`
 - **Session**: `SESSION_INACTIVITY_TIMEOUT_MS`
-- **System**: `INJECTION_MODE` (tmux), `SESSION_MAP_PATH`, `LOG_LEVEL`, `DAILY_RESTART_HOUR`
+- **System**: `LOG_LEVEL`, `DAILY_RESTART_HOUR`
 
 Config file hierarchy: `config/default.json` -> `config/user.json` -> env vars (deep merge with env overrides).
 

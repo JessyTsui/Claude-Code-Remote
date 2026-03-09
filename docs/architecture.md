@@ -79,14 +79,12 @@ User (Slack)                       Server                          Terminal
 |   |   |-- trace-capture.js       # TraceCapture: track user input timestamps
 |   |   |-- conversation-tracker.js # ConversationTracker: file-based Q&A history
 |   |   |-- subagent-tracker.js    # SubagentTracker: track subagent activities
-|   |   `-- controller-injector.js # ControllerInjector: tmux/pty command injection
 |   |
 |   |-- services/
 |   |   `-- daily-summary.js       # DailySummary: fetch channel msgs + Claude Agent SDK summarization
 |   |
 |   `-- data/
-|       |-- slack-sessions.db      # SQLite: sessions table (with alert_message_ts for alert sessions)
-|       `-- session-map.json       # JSON: token -> execution context mapping
+|       `-- slack-sessions.db      # SQLite: sessions table (with alert_message_ts for alert sessions)
 ```
 
 ---
@@ -346,17 +344,6 @@ Tracks subagent activities per session for inclusion in notifications.
 | `clearActivities(sessionId)`          | Clear session activities               |
 | `cleanupOldActivities()`              | Remove data older than 24h             |
 | `formatActivitiesForEmail(sessionId)` | Format as HTML (legacy, email-focused) |
-
-#### `ControllerInjector` (`src/utils/controller-injector.js`)
-
-Generic command injector supporting tmux and PTY modes.
-
-| Method                            | Description                             |
-|-----------------------------------|-----------------------------------------|
-| `injectCommand(command, session)` | Route to tmux or PTY based on mode      |
-| `_injectTmux(command, session)`   | `tmux send-keys` + Enter                |
-| `_injectPty(command, session)`    | Write to PTY path from session-map.json |
-| `listSessions()`                  | List tmux sessions or session-map keys  |
 
 ---
 
@@ -623,7 +610,5 @@ live tmux sessions (dead entries removed, alert reactions swapped for dead alert
 | `SLACK_XOXC_TOKEN`         | No       | Personal Slack token (xoxc-...) for reading channel history                          |
 | `SLACK_XOXD_TOKEN`         | No       | Personal Slack cookie token (xoxd-...) for reading channel history                   |
 | **System**                  |          |                                                                                     |
-| `INJECTION_MODE`            | No       | `tmux` (only supported mode)                                                        |
 | `LOG_LEVEL`                 | No       | `debug`/`info`/`warn`/`error`                                                       |
-| `SESSION_MAP_PATH`          | No       | Path to session-map.json                                                            |
 | `DAILY_RESTART_HOUR`        | No       | Hour (0-23) for daily Socket Mode restart                                           |

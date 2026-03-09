@@ -63,7 +63,7 @@ function writeEnvFile(values, existingEnv) {
         'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'SLACK_CHANNEL_ID',
         'SLACK_REPO_PATH', 'SLACK_REPO_ROOT', 'SLACK_CLAUDE_COMMAND',
         'SLACK_WHITELIST', 'SLACK_HTTP_PORT',
-        'INJECTION_MODE', 'LOG_LEVEL', 'SESSION_MAP_PATH'
+        'LOG_LEVEL'
     ];
 
     const merged = { ...existingEnv, ...values };
@@ -178,7 +178,6 @@ async function main() {
         SLACK_CLAUDE_COMMAND: claudeCommand,
         SLACK_WHITELIST: whitelist,
         SLACK_HTTP_PORT: httpPort,
-        INJECTION_MODE: 'tmux',
         LOG_LEVEL: logLevel
     };
 

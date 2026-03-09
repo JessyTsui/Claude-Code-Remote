@@ -33,10 +33,6 @@ class ConfigManager {
                     enabled: true,
                     priority: 1
                 }
-            },
-            relay: {
-                enabled: false,
-                injectionMode: 'tmux'
             }
         };
     }
