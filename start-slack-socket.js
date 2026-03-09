@@ -35,6 +35,7 @@ const config = {
     monitorChannels: process.env.MONITOR_CHANNELS || '',
     alertSkill: process.env.ALERT_SKILL || '',
     sessionInactivityTimeoutMs: parseInt(process.env.SESSION_INACTIVITY_TIMEOUT_MS) || 300000,
+    pollerTimeoutMs: parseInt(process.env.POLLER_TIMEOUT_MS) || 1800000, // 30 min
     pagerdutyApiToken: process.env.PAGERDUTY_API_TOKEN || '',
     pagerdutyFromEmail: process.env.PAGERDUTY_FROM_EMAIL || '',
     // Delay alert monitoring
@@ -162,6 +163,7 @@ async function start() {
     logger.info(`- Alert Skill: ${config.alertSkill || 'None'}`);
     logger.info(`- PagerDuty: ${config.pagerdutyApiToken ? 'Configured' : 'Not configured'}`);
     logger.info(`- Session Inactivity Timeout: ${config.sessionInactivityTimeoutMs}ms`);
+    logger.info(`- Poller Timeout: ${config.pollerTimeoutMs}ms`);
     logger.info(`- Delay Monitor Channels: ${config.monitorDelayChannels || 'None'}`);
     logger.info(`- Delay Alert Skill: ${config.delayAlertSkill}`);
     logger.info(`- Delay Alert Threshold: ${config.delayAlertThreshold} alerts in ${config.delayAlertWindowMs}ms`);

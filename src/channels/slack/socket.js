@@ -665,8 +665,8 @@ class SlackSocketHandler {
     async _processCommand(channelId, threadTs, command, say, messageTs, alertMessageTs = null) {
         // Create a say function if one wasn't provided (e.g. alert triggers)
         if (!say) {
-            say = async ({ text, thread_ts }) => {
-                await this.app.client.chat.postMessage({ channel: channelId, text, thread_ts: thread_ts || threadTs });
+            say = async (msg) => {
+                await this.app.client.chat.postMessage({ channel: channelId, thread_ts: threadTs, ...msg });
             };
         }
         const sessionKey = `${channelId}-${threadTs}`;
@@ -794,6 +794,7 @@ class SlackSocketHandler {
                 }
 
                 this.logger.info(`New session created: ${sessionName} for channel ${channelId}`);
+                this._startSessionTimeout(sessionKey);
             }
 
             // Handle /exit — clean up session
@@ -951,7 +952,7 @@ class SlackSocketHandler {
         let stableCount = 0;
         let attempts = 0;
         let processing = false;
-        const maxAttempts = 600; // 10 minutes per response cycle
+        const maxAttempts = Math.ceil((this.config.pollerTimeoutMs || 1800000) / 1000); // default 30 min
         const stableThreshold = 3;
 
         const interval = setInterval(async () => {
@@ -970,7 +971,12 @@ class SlackSocketHandler {
             if (attempts > maxAttempts) {
                 clearInterval(interval);
                 this.pollers.delete(pollKey);
-                await say({ text: 'Claude session timed out (10 min). Send another message to continue.', thread_ts: threadTs });
+                this.logger.warn(`Poller timeout after ${maxAttempts}s for ${sessionName} (alert=${isAlertSession})`);
+                try {
+                    await say({ text: 'Claude session timed out. Send another message to continue.', thread_ts: threadTs });
+                } catch (err) {
+                    this.logger.error(`Failed to send timeout message: ${err.message}`);
+                }
                 return;
             }
 

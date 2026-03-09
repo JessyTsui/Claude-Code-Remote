@@ -603,6 +603,7 @@ live tmux sessions (dead entries removed, alert reactions swapped for dead alert
 | `PAGERDUTY_API_TOKEN`       | No       | PagerDuty API token for auto-acknowledge                                            |
 | `PAGERDUTY_FROM_EMAIL`      | No       | PagerDuty "From" email for API calls                                                |
 | `SESSION_INACTIVITY_TIMEOUT_MS` | No   | Inactivity timeout for all sessions (default: 300000 = 5 min)                       |
+| `POLLER_TIMEOUT_MS`             | No   | Max time poller waits for Claude response (default: 1800000 = 30 min)               |
 | **Daily Summary**           |          |                                                                                     |
 | `DAILY_SUMMARY_CHANNELS`   | No       | Channels to summarize (format: `name:ID,name:ID`)                                   |
 | `DAILY_SUMMARY_TIME`       | No       | Time to run (HH:MM, local time, default: `07:00`)                                   |

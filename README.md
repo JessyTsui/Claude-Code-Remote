@@ -135,6 +135,7 @@ ALERT_SKILL=one:pay-ops-production
 PAGERDUTY_API_TOKEN=your-token
 PAGERDUTY_FROM_EMAIL=your-email@company.com
 SESSION_INACTIVITY_TIMEOUT_MS=300000
+# POLLER_TIMEOUT_MS=1800000
 ```
 
 When a PagerDuty alert appears in a monitored channel:
