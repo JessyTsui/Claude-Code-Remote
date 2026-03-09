@@ -37,6 +37,12 @@ const config = {
     sessionInactivityTimeoutMs: parseInt(process.env.SESSION_INACTIVITY_TIMEOUT_MS) || 300000,
     pagerdutyApiToken: process.env.PAGERDUTY_API_TOKEN || '',
     pagerdutyFromEmail: process.env.PAGERDUTY_FROM_EMAIL || '',
+    // Delay alert monitoring
+    monitorDelayChannels: process.env.MONITOR_DELAY_CHANNELS || '',
+    delayAlertThreshold: process.env.DELAY_ALERT_THRESHOLD || '3',
+    delayAlertWindowMs: process.env.DELAY_ALERT_WINDOW_MS || '3600000',
+    delayAlertTaskPatterns: process.env.DELAY_ALERT_TASK_PATTERNS || '',
+    delayAlertSkill: process.env.DELAY_ALERT_SKILL || 'one:pay-ops-tax-production',
     // Daily summary
     dailySummaryChannels: process.env.DAILY_SUMMARY_CHANNELS || '',
     dailySummaryTime: process.env.DAILY_SUMMARY_TIME || '07:00',
@@ -156,6 +162,9 @@ async function start() {
     logger.info(`- Alert Skill: ${config.alertSkill || 'None'}`);
     logger.info(`- PagerDuty: ${config.pagerdutyApiToken ? 'Configured' : 'Not configured'}`);
     logger.info(`- Session Inactivity Timeout: ${config.sessionInactivityTimeoutMs}ms`);
+    logger.info(`- Delay Monitor Channels: ${config.monitorDelayChannels || 'None'}`);
+    logger.info(`- Delay Alert Skill: ${config.delayAlertSkill}`);
+    logger.info(`- Delay Alert Threshold: ${config.delayAlertThreshold} alerts in ${config.delayAlertWindowMs}ms`);
     logger.info(`- Daily Summary: ${config.dailySummaryChannels ? `${config.dailySummaryTime} → ${config.dailySummaryChannels}` : 'Not configured'}`);
 
     await handler.start();

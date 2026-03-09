@@ -14,6 +14,7 @@ const fs = require('fs');
 const axios = require('axios');
 const Logger = require('../../core/logger');
 const AlertMonitor = require('./alert-monitor');
+const DelayAlertMonitor = require('./delay-alert-monitor');
 const { runDailySummary, parseChannelsConfig } = require('../../services/daily-summary');
 
 class SlackSocketHandler {
@@ -45,6 +46,9 @@ class SlackSocketHandler {
         // Alert monitoring
         this.alertMonitor = new AlertMonitor(this.app, config);
         this.trackedIncidents = new Set();
+
+        // Delay alert monitoring
+        this.delayAlertMonitor = new DelayAlertMonitor(this.app, this.db, config);
 
         this._setupListeners();
         this._setupHttpServer();
@@ -463,6 +467,7 @@ class SlackSocketHandler {
         this.app.event('message', async ({ event }) => {
             try {
                 await this._handleMonitoredMessage(event);
+                await this._handleDelayAlertMessage(event);
             } catch (err) {
                 if (err.message && (err.message.includes('no active connection') || err.message.includes('client is not ready'))) {
                     this.logger.warn(`Message handler failed (disconnected): ${err.message}`);
@@ -529,14 +534,14 @@ class SlackSocketHandler {
             ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
             : '';
 
-        // Build prompt
+        // Build prompt — use "execute skill" so Claude invokes the skill directly
         const permalink = await this._getPermalink(channelId, messageTs);
         const alertSkill = this.config.alertSkill;
         let prompt;
         if (alertSkill && permalink) {
-            prompt = `/${alertSkill} ${permalink}${imageInstruction}`;
+            prompt = `execute ${alertSkill} skill with argument ${permalink}${imageInstruction}`;
         } else if (alertSkill) {
-            prompt = `/${alertSkill} Alert: ${text.substring(0, 500)}${imageInstruction}`;
+            prompt = `execute ${alertSkill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
         } else if (permalink) {
             prompt = `Investigate this PagerDuty alert: ${permalink}${imageInstruction}`;
         } else {
@@ -544,6 +549,74 @@ class SlackSocketHandler {
         }
 
         // Use the regular command flow — messageTs as threadTs (replies go in alert thread)
+        await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
+    }
+
+    async _handleDelayAlertMessage(event) {
+        // Filter out message edits and subtypes
+        if (event.subtype) return;
+
+        const channelId = event.channel;
+        if (!this.delayAlertMonitor.isMonitoredChannel(channelId)) return;
+
+        // Detect Airflow delay alerts
+        if (!this.delayAlertMonitor.isAirflowDelayAlert(event)) return;
+
+        const alertInfo = this.delayAlertMonitor.extractAlertInfo(event);
+        if (!alertInfo) return;
+
+        // Check task pattern match
+        if (!this.delayAlertMonitor.matchesTaskPattern(alertInfo.task)) {
+            this.logger.info(`Delay alert skipped (pattern mismatch): task=${alertInfo.task} dag=${alertInfo.dag}`);
+            return;
+        }
+
+        const messageTs = event.ts;
+        this.logger.info(`Delay alert detected: dag=${alertInfo.dag} task=${alertInfo.task} ts=${messageTs}`);
+
+        // Increment counter (persisted to SQLite)
+        const { count, triggered } = this.delayAlertMonitor.incrementCounter(alertInfo.dag, channelId, messageTs);
+
+        if (!triggered) return;
+
+        // Threshold reached — trigger investigation
+        this.logger.info(`Delay alert threshold reached for ${alertInfo.dag} (${count} alerts) — triggering investigation`);
+
+        // Dedup: check if we already have a session for this message
+        const sessionKey = `${channelId}-${messageTs}`;
+        if (this._getSession(sessionKey)) {
+            this.logger.info(`Skipping: session already exists for ${sessionKey}`);
+            return;
+        }
+
+        // React with eyes on the triggering message
+        await this._addReaction(channelId, messageTs, 'eyes');
+
+        // Download attached images (if any — Airflow alerts are usually text-only)
+        const imagePaths = await this._downloadSlackImages(event.files, `delay-alert-${messageTs.replace('.', '')}`);
+        const imageInstruction = imagePaths.length > 0
+            ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
+            : '';
+
+        // Build prompt — use "execute skill" so Claude invokes the skill directly
+        const text = event.text || '';
+        const permalink = await this._getPermalink(channelId, messageTs);
+        const skill = this.delayAlertMonitor.skill;
+        let prompt;
+        if (skill && permalink) {
+            prompt = `execute ${skill} skill with argument ${permalink}${imageInstruction}`;
+        } else if (skill) {
+            prompt = `execute ${skill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
+        } else if (permalink) {
+            prompt = `Investigate this Airflow delay alert: ${permalink}${imageInstruction}`;
+        } else {
+            prompt = `Investigate this Airflow delay alert: ${text.substring(0, 500)}${imageInstruction}`;
+        }
+
+        // Reset counter after triggering (so it can accumulate again)
+        this.delayAlertMonitor.resetCounter(alertInfo.dag);
+
+        // Use the regular command flow — messageTs as threadTs
         await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
     }
 
@@ -1476,14 +1549,14 @@ class SlackSocketHandler {
                     ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
                     : '';
 
-                // Build prompt
+                // Build prompt — use "execute skill" so Claude invokes the skill directly
                 const permalink = await this._getPermalink(channelId, messageTs);
                 const alertSkill = this.config.alertSkill;
                 let prompt;
                 if (alertSkill && permalink) {
-                    prompt = `/${alertSkill} ${permalink}${imageInstruction}`;
+                    prompt = `execute ${alertSkill} skill with argument ${permalink}${imageInstruction}`;
                 } else if (alertSkill) {
-                    prompt = `/${alertSkill} Alert: ${text.substring(0, 500)}${imageInstruction}`;
+                    prompt = `execute ${alertSkill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
                 } else if (permalink) {
                     prompt = `Investigate this alert: ${permalink}${imageInstruction}`;
                 } else {
@@ -1556,6 +1629,9 @@ class SlackSocketHandler {
         // Re-initialize DB if it was closed (e.g. after stop() during daily restart)
         if (!this.db || !this.db.open) {
             this._initDb();
+            // Re-init delay alert monitor's DB reference and counters table
+            this.delayAlertMonitor.db = this.db;
+            this.delayAlertMonitor._initCountersTable();
         }
 
         // Reconcile DB sessions with live tmux sessions
@@ -1571,6 +1647,7 @@ class SlackSocketHandler {
         // Resolve monitored channels
         const t2 = Date.now();
         await this.alertMonitor.resolveMonitorChannels();
+        await this.delayAlertMonitor.resolveMonitorChannels();
         this.logger.info(`[startup] resolveMonitorChannels: ${Date.now() - t2}ms`);
 
         this.httpServer = this._httpApp.listen(this.httpPort, () => {
