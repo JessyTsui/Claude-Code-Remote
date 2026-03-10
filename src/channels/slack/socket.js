@@ -404,41 +404,41 @@ class SlackSocketHandler {
 
         client.on('connected', () => {
             this.connected = true;
-            this.logger.info('Socket Mode connected');
+            this.logger.debug('Socket Mode connected');
             this._clearReconnectTimer();
         });
 
         client.on('disconnected', () => {
             this.connected = false;
-            this.logger.warn('Socket Mode disconnected');
+            this.logger.debug('Socket Mode disconnected');
             this._startReconnectTimer();
         });
 
         client.on('error', (error) => {
-            this.logger.error(`Socket Mode error: ${error.message}`);
+            this.logger.debug(`Socket Mode error: ${error.message}`);
         });
 
         client.on('close', (code, reason) => {
             this.connected = false;
-            this.logger.warn(`Socket Mode closed: code=${code} reason=${reason || 'none'}`);
+            this.logger.debug(`Socket Mode closed: code=${code} reason=${reason || 'none'}`);
             this._startReconnectTimer();
         });
     }
 
     _startReconnectTimer() {
         if (this._reconnectTimer) return;
-        this.logger.info(`Reconnect watchdog: will force restart in ${this._reconnectDelay / 1000}s if still disconnected`);
+        this.logger.debug(`Reconnect watchdog: will force restart in ${this._reconnectDelay / 1000}s if still disconnected`);
         this._reconnectTimer = setTimeout(async () => {
             this._reconnectTimer = null;
             if (this.connected) return;
-            this.logger.warn('Reconnect watchdog fired — forcing full restart of Bolt app');
+            this.logger.debug('Reconnect watchdog fired — forcing full restart of Bolt app');
             try {
                 await this.app.stop();
                 await this.app.start();
                 this.connected = true;
-                this.logger.info('Bolt app restarted successfully');
+                this.logger.debug('Bolt app restarted successfully');
             } catch (err) {
-                this.logger.error(`Bolt app restart failed: ${err.message}`);
+                this.logger.debug(`Bolt app restart failed: ${err.message}`);
             }
         }, this._reconnectDelay);
     }

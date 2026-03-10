@@ -201,7 +201,7 @@ class DelayAlertMonitor {
 
             if (elapsed > this.windowMs) {
                 // Window expired — reset counter
-                this.logger.info(`Counter for ${dagName} expired (${Math.round(elapsed / 60000)}min > ${Math.round(this.windowMs / 60000)}min) — resetting`);
+                this.logger.info(`Counter for ${dagName} expired (${Math.round(elapsed / 1000)}s > ${Math.round(this.windowMs / 1000)}s) — resetting`);
                 this._counterStmts.upsert.run({
                     dag_name: dagName,
                     count: 1,
@@ -223,7 +223,7 @@ class DelayAlertMonitor {
             });
 
             const triggered = newCount === this.threshold;
-            this.logger.info(`Counter for ${dagName}: ${newCount}/${this.threshold}${triggered ? ' — THRESHOLD REACHED' : ''}`);
+            this.logger.info(`Counter for ${dagName}: ${newCount}/${this.threshold}${triggered ? ' — THRESHOLD REACHED' : ` — ${this.threshold - newCount} more to trigger`}`);
             return { count: newCount, triggered };
         }
 
@@ -235,7 +235,7 @@ class DelayAlertMonitor {
             last_message_ts: messageTs,
             channel_id: channelId,
         });
-        this.logger.info(`Counter for ${dagName}: 1/${this.threshold} (new)`);
+        this.logger.info(`Counter for ${dagName}: 1/${this.threshold} — ${this.threshold - 1} more to trigger (new)`);
         return { count: 1, triggered: this.threshold === 1 };
     }
 
