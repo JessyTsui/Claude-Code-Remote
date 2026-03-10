@@ -794,7 +794,10 @@ class SlackSocketHandler {
                 }
 
                 this.logger.info(`New session created: ${sessionName} for channel ${channelId}`);
-                this._startSessionTimeout(sessionKey);
+                // Alert sessions: don't start timeout until first response (investigation can take >5min)
+                if (!alertMessageTs) {
+                    this._startSessionTimeout(sessionKey);
+                }
             }
 
             // Handle /exit — clean up session
@@ -1017,8 +1020,22 @@ class SlackSocketHandler {
                     this.logger.info(`Poll #${attempts} | stable=${stableCount} hasPrompt=${hasPrompt} isWorking=${isWorking} | last5: ${lastFiveLines}`);
                 }
 
+                if (isAlertSession && isWorking && attempts % 30 === 0) {
+                    this.logger.info(`Alert poll #${attempts} | Claude still working in ${sessionName}`);
+                }
+
                 if (hasPrompt && !isWorking) {
+                    // Skip extraction if output hasn't changed since last baseline reset
+                    if (baselineOutput === currentOutput) {
+                        stableCount = 0;
+                        return;
+                    }
+
                     const response = this._extractResponse(baselineOutput, currentOutput);
+
+                    if (!response && isAlertSession) {
+                        this.logger.warn(`Alert extraction returned empty for ${sessionName} (baseline=${baselineOutput.length} chars, current=${currentOutput.length} chars)`);
+                    }
 
                     if (response) {
                         processing = true;
@@ -1074,7 +1091,12 @@ class SlackSocketHandler {
             clearTimeout(this.sessionTimers.get(sessionKey));
         }
 
-        const timeoutMs = this.config.sessionInactivityTimeoutMs || 300000;
+        const session = this._getSession(sessionKey);
+        const isAlert = !!session?.alertMessageTs;
+        const defaultTimeout = isAlert ? 600000 : 300000; // 10min for alerts, 5min for regular
+        const configTimeout = this.config.sessionInactivityTimeoutMs;
+        // For alerts, use the longer default unless config explicitly exceeds it
+        const timeoutMs = isAlert ? Math.max(configTimeout || 0, defaultTimeout) : (configTimeout || defaultTimeout);
         const timer = setTimeout(async () => {
             const session = this._getSession(sessionKey);
             if (!session) {
@@ -1165,7 +1187,14 @@ class SlackSocketHandler {
                 }
             }
 
-            newLines = anchorEnd >= 0 ? currentLines.slice(anchorEnd) : [];
+            if (anchorEnd >= 0) {
+                newLines = currentLines.slice(anchorEnd);
+            } else {
+                // Anchor completely scrolled out of buffer — use entire buffer as response.
+                // This happens when Claude's output exceeds the 200-line tmux capture window.
+                this.logger?.info?.(`Anchor lost (buffer scrolled past baseline) — using full buffer (${currentLines.length} lines)`);
+                newLines = currentLines;
+            }
         }
         const responseLines = newLines.filter(line => {
             const trimmed = line.trim();
