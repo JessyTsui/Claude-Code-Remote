@@ -202,6 +202,16 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
+// Track last log time per rejection reason to avoid log spam
+const _rejectionLogTimes = new Map();
+const REJECTION_LOG_INTERVAL = 60000; // 1 min
+
 process.on('unhandledRejection', (reason) => {
-    logger.error(`Unhandled rejection: ${reason instanceof Error ? reason.message : reason}`);
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    const now = Date.now();
+    const lastLogged = _rejectionLogTimes.get(msg) || 0;
+    if (now - lastLogged >= REJECTION_LOG_INTERVAL) {
+        _rejectionLogTimes.set(msg, now);
+        logger.error(`Unhandled rejection: ${msg}`);
+    }
 });

@@ -38,8 +38,7 @@ class SlackSocketHandler {
 
         // Connection state tracking
         this.connected = false;
-        this._reconnectTimer = null;
-        this._reconnectDelay = 30000; // 30s watchdog
+        this._healthCheckInterval = null;
 
         this._initDb();
 
@@ -405,13 +404,11 @@ class SlackSocketHandler {
         client.on('connected', () => {
             this.connected = true;
             this.logger.debug('Socket Mode connected');
-            this._clearReconnectTimer();
         });
 
         client.on('disconnected', () => {
             this.connected = false;
             this.logger.debug('Socket Mode disconnected');
-            this._startReconnectTimer();
         });
 
         client.on('error', (error) => {
@@ -421,33 +418,40 @@ class SlackSocketHandler {
         client.on('close', (code, reason) => {
             this.connected = false;
             this.logger.debug(`Socket Mode closed: code=${code} reason=${reason || 'none'}`);
-            this._startReconnectTimer();
         });
     }
 
-    _startReconnectTimer() {
-        if (this._reconnectTimer) return;
-        this.logger.debug(`Reconnect watchdog: will force restart in ${this._reconnectDelay / 1000}s if still disconnected`);
-        this._reconnectTimer = setTimeout(async () => {
-            this._reconnectTimer = null;
-            if (this.connected) return;
-            this.logger.debug('Reconnect watchdog fired — forcing full restart of Bolt app');
-            try {
-                await this.app.stop();
-                await this.app.start();
-                this.connected = true;
-                this.logger.debug('Bolt app restarted successfully');
-            } catch (err) {
-                this.logger.debug(`Bolt app restart failed: ${err.message}`);
-            }
-        }, this._reconnectDelay);
-    }
+    _startHealthCheck() {
+        if (this._healthCheckInterval) return;
+        let consecutiveFailures = 0;
+        const MAX_FAILURES = 3;
 
-    _clearReconnectTimer() {
-        if (this._reconnectTimer) {
-            clearTimeout(this._reconnectTimer);
-            this._reconnectTimer = null;
-        }
+        this._healthCheckInterval = setInterval(async () => {
+            try {
+                await this.app.client.auth.test();
+                consecutiveFailures = 0;
+                if (!this.connected) {
+                    this.connected = true;
+                    this.logger.info('Socket Mode connection recovered');
+                }
+            } catch (err) {
+                consecutiveFailures++;
+                this.connected = false;
+                if (consecutiveFailures === MAX_FAILURES) {
+                    this.logger.warn(`Health check failed ${MAX_FAILURES}x — forcing full restart`);
+                    try {
+                        await this.app.stop();
+                        await this.app.start();
+                        this.connected = true;
+                        consecutiveFailures = 0;
+                        this.logger.info('Bolt app restarted successfully via health check');
+                    } catch (restartErr) {
+                        this.logger.error(`Health check restart failed: ${restartErr.message}`);
+                        consecutiveFailures = 0; // reset to try again in 3 min
+                    }
+                }
+            }
+        }, 60000);
     }
 
     _setupListeners() {
@@ -1677,6 +1681,7 @@ class SlackSocketHandler {
         await this.app.start();
         this.connected = true;
         this._setupConnectionMonitor();
+        this._startHealthCheck();
         this.logger.info(`[startup] Slack Socket Mode connected: ${Date.now() - t1}ms`);
 
         // Resolve monitored channels
@@ -1692,7 +1697,10 @@ class SlackSocketHandler {
     }
 
     async stop() {
-        this._clearReconnectTimer();
+        if (this._healthCheckInterval) {
+            clearInterval(this._healthCheckInterval);
+            this._healthCheckInterval = null;
+        }
 
         if (this.httpServer) {
             await new Promise(resolve => this.httpServer.close(resolve));
