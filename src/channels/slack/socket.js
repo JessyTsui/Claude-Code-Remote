@@ -719,22 +719,22 @@ class SlackSocketHandler {
                 const claudeCmd = this.config.claudeCommand || 'claude --dangerously-skip-permissions';
 
                 // Resolve repo path — check for project name patterns
-                // Supported: "start claude from root" (uses SLACK_REPO_ROOT directly),
-                //            "project XXX from root", "start claude from XXX project",
-                //            "start claude from XXX", "start claude in XXX project", etc.
+                // Supported: "start [claude] from root" (uses SLACK_REPO_ROOT directly),
+                //            "project XXX from root", "start [claude] from XXX project",
+                //            "start [claude] from XXX", "start [claude] in XXX project", etc.
                 let repoPath = this.config.repoPath || process.cwd();
-                const rootMatch = command.match(/start\s+claude\s+(?:from|in)\s+root\s*$/i);
+                const rootMatch = command.match(/start\s+(?:claude\s+)?(?:from|in)\s+root\s*$/i);
                 const projectMatch = !rootMatch && (
                     command.match(
-                        /(?:start\s+claude\s+(?:from|in)\s+)?project\s+(\S+)(?:\s+from\s+root)?/i
+                        /(?:start\s+(?:claude\s+)?(?:from|in)\s+)?project\s+(\S+)(?:\s+from\s+root)?/i
                     ) || command.match(
-                        /start\s+claude\s+(?:from|in)\s+(\S+?)(?:\s+project)?\s*$/i
+                        /start\s+(?:claude\s+)?(?:from|in)\s+(\S+?)(?:\s+project)?\s*$/i
                     )
                 );
                 if (rootMatch) {
                     if (this.config.repoRoot) {
                         repoPath = this.config.repoRoot;
-                        command = command.replace(/start\s+claude\s+(?:from|in)\s+root\s*$/i, '').trim();
+                        command = command.replace(/start\s+(?:claude\s+)?(?:from|in)\s+root\s*$/i, '').trim();
                         this.logger.info(`Using repo root: ${repoPath}`);
                     } else {
                         await say({ text: '`SLACK_REPO_ROOT` is not configured. Set it in `.env`.', thread_ts: threadTs });
@@ -747,8 +747,8 @@ class SlackSocketHandler {
                         repoPath = candidatePath;
                         // Strip the project resolution part so Claude gets a clean prompt
                         command = command
-                            .replace(/(?:start\s+claude\s+(?:from|in)\s+)?project\s+\S+(?:\s+from\s+root)?[,.]?\s*/i, '')
-                            .replace(/start\s+claude\s+(?:from|in)\s+\S+?(?:\s+project)?\s*$/i, '')
+                            .replace(/(?:start\s+(?:claude\s+)?(?:from|in)\s+)?project\s+\S+(?:\s+from\s+root)?[,.]?\s*/i, '')
+                            .replace(/start\s+(?:claude\s+)?(?:from|in)\s+\S+?(?:\s+project)?\s*$/i, '')
                             .trim();
                         this.logger.info(`Resolved project "${projectName}" to ${repoPath}`);
                     } else {
