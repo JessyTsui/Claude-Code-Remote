@@ -898,7 +898,35 @@ class SlackSocketHandler {
                     resolve(false);
                     return;
                 }
-                setTimeout(() => resolve(true), 3000);
+                // Poll for Claude Code readiness instead of hardcoded wait
+                const maxWaitMs = 30000;
+                const pollIntervalMs = 1000;
+                let elapsed = 0;
+                const poll = () => {
+                    elapsed += pollIntervalMs;
+                    try {
+                        const output = execSync(`tmux capture-pane -t ${sessionName} -p -S -50`, {
+                            encoding: 'utf8',
+                            stdio: ['ignore', 'pipe', 'ignore']
+                        });
+                        // Claude Code shows ) or ❯ or > as input prompt when ready
+                        if (/^[)❯>]\s*$/m.test(output)) {
+                            this.logger.info(`Claude Code ready after ${elapsed}ms`);
+                            resolve(true);
+                            return;
+                        }
+                    } catch {
+                        // capture failed, keep polling
+                    }
+                    if (elapsed >= maxWaitMs) {
+                        this.logger.warn(`Claude Code readiness timeout after ${maxWaitMs}ms, proceeding anyway`);
+                        resolve(true);
+                        return;
+                    }
+                    setTimeout(poll, pollIntervalMs);
+                };
+                // Initial delay before first poll
+                setTimeout(poll, pollIntervalMs);
             });
         });
     }
@@ -913,7 +941,7 @@ class SlackSocketHandler {
 
                 setTimeout(() => {
                     const escaped = command.replace(/'/g, "'\"'\"'");
-                    exec(`tmux send-keys -t ${sessionName} '${escaped}'`, (sendErr) => {
+                    exec(`tmux send-keys -t ${sessionName} -l '${escaped}'`, (sendErr) => {
                         if (sendErr) {
                             reject(new Error(`Failed to send command: ${sendErr.message}`));
                             return;
@@ -952,6 +980,9 @@ class SlackSocketHandler {
         const pollKey = sessionName;
         const isAlertSession = !!session.alertMessageTs;
         let isFirstResponse = isAlertSession; // only true for the very first response of an alert
+        let alertBuffer = '';
+        let alertAccumulationCount = 0;
+        const alertStableThreshold = 8; // 8s stability for alert first response (vs 3s regular)
 
         if (this.pollers.has(pollKey)) {
             clearInterval(this.pollers.get(pollKey).interval);
@@ -972,6 +1003,16 @@ class SlackSocketHandler {
             if (!this._isTmuxSessionAlive(sessionName)) {
                 clearInterval(interval);
                 this.pollers.delete(pollKey);
+                // Flush accumulated alert buffer before stopping
+                if (alertBuffer) {
+                    this.logger.info(`Flushing alert buffer (${alertBuffer.length} chars) on tmux death for ${sessionName}`);
+                    try {
+                        const sessionStats = this._extractSessionStats(this._captureOutput(sessionName));
+                        await this._sendAlertSummary(say, threadTs, alertBuffer, sessionStats);
+                    } catch (err) {
+                        this.logger.error(`Failed to flush alert buffer on tmux death: ${err.message}`);
+                    }
+                }
                 this.logger.info(`Poller stopped: tmux session ${sessionName} is dead`);
                 return;
             }
@@ -983,9 +1024,15 @@ class SlackSocketHandler {
                 this.pollers.delete(pollKey);
                 this.logger.warn(`Poller timeout after ${maxAttempts}s for ${sessionName} (alert=${isAlertSession})`);
                 try {
-                    await say({ text: 'Claude session timed out. Send another message to continue.', thread_ts: threadTs });
+                    if (alertBuffer) {
+                        this.logger.info(`Flushing alert buffer (${alertBuffer.length} chars) on timeout for ${sessionName}`);
+                        const sessionStats = this._extractSessionStats(this._captureOutput(sessionName));
+                        await this._sendAlertSummary(say, threadTs, alertBuffer, sessionStats);
+                    } else {
+                        await say({ text: 'Claude session timed out. Send another message to continue.', thread_ts: threadTs });
+                    }
                 } catch (err) {
-                    this.logger.error(`Failed to send timeout message: ${err.message}`);
+                    this.logger.error(`Failed to send timeout/flush message: ${err.message}`);
                 }
                 return;
             }
@@ -999,7 +1046,7 @@ class SlackSocketHandler {
                 lastOutput = currentOutput;
             }
 
-            if (stableCount >= stableThreshold) {
+            if (stableCount >= (isAlertSession && isFirstResponse ? alertStableThreshold : stableThreshold)) {
                 const lines = currentOutput.trimEnd().split('\n');
 
                 // Check last 10 lines for a bare prompt (❯ or >)
@@ -1045,18 +1092,54 @@ class SlackSocketHandler {
                     }
 
                     if (response) {
+                        // Alert first response: accumulate until completion marker or fallback
+                        if (isAlertSession && isFirstResponse) {
+                            alertBuffer += (alertBuffer ? '\n' : '') + response;
+                            alertAccumulationCount++;
+
+                            const hasCompletionMarker = alertBuffer.includes('Recommended Action:');
+
+                            if (hasCompletionMarker || alertAccumulationCount >= 5) {
+                                processing = true;
+                                try {
+                                    const reason = hasCompletionMarker ? 'completion marker found' : `fallback after ${alertAccumulationCount} cycles`;
+                                    this.logger.info(`Alert posting (${reason}): ${alertBuffer.length} chars for ${sessionName}`);
+                                    const sessionStats = this._extractSessionStats(currentOutput);
+                                    await this._sendAlertSummary(say, threadTs, alertBuffer, sessionStats);
+                                    isFirstResponse = false;
+                                    alertBuffer = '';
+                                    alertAccumulationCount = 0;
+                                    this.logger.info(`Alert summary sent to Slack thread ${threadTs}`);
+
+                                    if (sessionKey) {
+                                        const nowTs = String(Date.now() / 1000);
+                                        this._updateLastBotTs(sessionKey, nowTs);
+                                        this._startSessionTimeout(sessionKey);
+                                    }
+                                } catch (err) {
+                                    this.logger.error(`Failed to send alert summary to Slack: ${err.message}`);
+                                } finally {
+                                    processing = false;
+                                }
+                            } else {
+                                this.logger.info(`Alert accumulating cycle ${alertAccumulationCount} (${alertBuffer.length} chars) for ${sessionName}, waiting for completion marker`);
+                            }
+
+                            // Always reset baseline so next diff is incremental
+                            baselineOutput = currentOutput;
+                            lastOutput = currentOutput;
+                            stableCount = 0;
+                            attempts = 0;
+                            return;
+                        }
+
+                        // Regular session or subsequent alert responses
                         processing = true;
                         try {
                             const sessionStats = this._extractSessionStats(currentOutput);
                             this.logger.info(`Response extracted (${response.length} chars): "${response.substring(0, 200)}"`);
 
-                            if (isFirstResponse) {
-                                // Alert first response: post summary + upload full report as file
-                                await this._sendAlertSummary(say, threadTs, response, sessionStats);
-                                isFirstResponse = false;
-                            } else {
-                                await this._sendResponse(say, threadTs, response, sessionStats);
-                            }
+                            await this._sendResponse(say, threadTs, response, sessionStats);
                             this.logger.info(`Response sent to Slack thread ${threadTs}`);
 
                             // Track last bot response timestamp for thread context
@@ -1562,6 +1645,7 @@ class SlackSocketHandler {
             // Check for duplicate
             const sessionKey = `${channelId}-${messageTs}`;
             if (this._getSession(sessionKey)) {
+                this.logger.warn(`Trigger-alert skipped: session already exists for ${sessionKey}`);
                 return res.status(409).json({ error: 'Session already exists for this message', channelId, messageTs });
             }
 
