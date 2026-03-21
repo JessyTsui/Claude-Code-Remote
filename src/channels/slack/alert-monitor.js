@@ -142,6 +142,7 @@ class AlertMonitor {
         const text = (event.text || '').trim();
         if (text.startsWith('Acknowledged')) return true;
         if (text.startsWith('Resolved')) return true;
+        if (/^:[\w_]+:\s*Status changed to/i.test(text)) return true;
         return false;
     }
 

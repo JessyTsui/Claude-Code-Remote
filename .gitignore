@@ -55,3 +55,4 @@ src/data/
 # Claude configuration (user-specific)
 /.claude/settings.local.json
 /.serena
+/docs/plans

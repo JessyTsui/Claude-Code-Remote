@@ -486,6 +486,9 @@ class SlackSocketHandler {
         // Filter out message edits and subtypes (joins, topic changes, etc.)
         if (event.subtype) return;
 
+        // Skip thread replies — PD sends status updates as thread replies
+        if (event.thread_ts && event.thread_ts !== event.ts) return;
+
         const channelId = event.channel;
         if (!this.alertMonitor.isMonitoredChannel(channelId)) return;
 
@@ -642,7 +645,7 @@ class SlackSocketHandler {
 
         this.logger.info(`Mention received | user=${userId} channel=${channelId} thread=${threadTs} text="${rawText.substring(0, 100)}"`);
 
-        if (!this._isOwner(userId)) {
+        if (!this._isOwner(userId) && !this.alertMonitor.isMonitoredChannel(channelId)) {
             await say({ text: `Sorry, I can only respond to my owner to save Claude's API tokens. 🙏`, thread_ts: threadTs });
             return;
         }
