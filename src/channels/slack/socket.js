@@ -89,6 +89,11 @@ class SlackSocketHandler {
         } catch {
             // Column already exists
         }
+        try {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_user_id TEXT');
+        } catch {
+            // Column already exists
+        }
 
         this._stmts = {
             upsert: this.db.prepare(`
@@ -101,7 +106,8 @@ class SlackSocketHandler {
             delete: this.db.prepare('DELETE FROM sessions WHERE session_key = ?'),
             deleteOld: this.db.prepare('DELETE FROM sessions WHERE updated_at < ?'),
             touch: this.db.prepare('UPDATE sessions SET updated_at = ? WHERE session_key = ?'),
-            updateLastBotTs: this.db.prepare('UPDATE sessions SET last_bot_ts = ?, updated_at = ? WHERE session_key = ?')
+            updateLastBotTs: this.db.prepare('UPDATE sessions SET last_bot_ts = ?, updated_at = ? WHERE session_key = ?'),
+            updateLastUserId: this.db.prepare('UPDATE sessions SET last_user_id = ?, updated_at = ? WHERE session_key = ?')
         };
 
         // Clean up sessions older than 7 days
@@ -135,7 +141,8 @@ class SlackSocketHandler {
             repoPath: row.repo_path,
             createdAt: row.created_at,
             lastBotTs: row.last_bot_ts || null,
-            alertMessageTs: row.alert_message_ts || null
+            alertMessageTs: row.alert_message_ts || null,
+            lastUserId: row.last_user_id || null
         };
     }
 
@@ -189,6 +196,24 @@ class SlackSocketHandler {
         }
 
         this.logger.info(`Session reconciliation: ${alive} alive, ${removed} stale removed`);
+
+        // Kill orphan tmux sessions not tracked in DB
+        try {
+            const tmuxList = execSync("tmux list-sessions -F '#{session_name}' 2>/dev/null").toString().trim();
+            if (tmuxList) {
+                const dbSessionNames = new Set(sessions.map(s => s.sessionName));
+                const orphans = tmuxList.split('\n').filter(name => name.startsWith('slack-') && !dbSessionNames.has(name));
+                for (const name of orphans) {
+                    try {
+                        execSync(`tmux kill-session -t ${name} 2>/dev/null`);
+                        this.logger.info(`Killed orphan tmux session: ${name}`);
+                    } catch (_) {}
+                }
+                if (orphans.length > 0) {
+                    this.logger.info(`Killed ${orphans.length} orphan tmux sessions not in DB`);
+                }
+            }
+        } catch (_) { /* no tmux server running */ }
     }
 
     _isTmuxSessionAlive(sessionName) {
@@ -298,7 +323,7 @@ class SlackSocketHandler {
      * @param {string|null} sinceTs - Only return messages after this timestamp (exclusive)
      * @returns {Array<{user: string, text: string, ts: string}>}
      */
-    async _fetchThreadMessages(channelId, threadTs, sinceTs = null) {
+    async _fetchThreadMessages(channelId, threadTs, sinceTs = null, { includeBotMessages = true } = {}) {
         const messages = [];
         let cursor;
 
@@ -311,15 +336,26 @@ class SlackSocketHandler {
             });
 
             for (const msg of (result.messages || [])) {
-                // Skip the thread root if sinceTs is not set (it's the first message)
-                // but include it for full context on first mention
                 if (sinceTs && parseFloat(msg.ts) <= parseFloat(sinceTs)) continue;
-                // Skip bot's own messages
-                if (msg.bot_id || (msg.app_id && !msg.user)) continue;
+                // Optionally skip bot messages (for live session injection — no context needed)
+                if (!includeBotMessages && (msg.bot_id || (msg.app_id && !msg.user))) continue;
+
+                const isBot = !!(msg.bot_id || (msg.app_id && !msg.user));
+                let text = msg.text || '';
+
+                // Fetch file attachments via Gemini (skip for bot messages to avoid re-describing our own uploads)
+                if (!isBot && msg.files && msg.files.length > 0) {
+                    const fileContents = await this._fetchFileContents(msg.files);
+                    if (fileContents) {
+                        text += '\n' + fileContents;
+                    }
+                }
+
                 messages.push({
-                    user: msg.user || 'unknown',
-                    text: msg.text || '',
-                    ts: msg.ts
+                    user: msg.user || (isBot ? 'EnzoBot' : 'unknown'),
+                    text,
+                    ts: msg.ts,
+                    isBot
                 });
             }
 
@@ -327,6 +363,51 @@ class SlackSocketHandler {
         } while (cursor);
 
         return messages;
+    }
+
+    /**
+     * Fetch file attachments from Slack and describe/summarize via Gemini.
+     * All file types go through Gemini — images get vision description,
+     * text/code files get summarized. Skips files >10MB.
+     */
+    async _fetchFileContents(files) {
+        if (!files || files.length === 0) return null;
+
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+            this.logger.warn('GEMINI_API_KEY not set, skipping file content extraction');
+            return null;
+        }
+
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const parts = [];
+
+        for (const file of files) {
+            if (!file.mimetype || file.size > 10000000) continue;
+
+            try {
+                const response = await axios.get(file.url_private_download, {
+                    headers: { Authorization: `Bearer ${this.config.botToken}` },
+                    responseType: 'arraybuffer'
+                });
+                const base64 = Buffer.from(response.data).toString('base64');
+
+                const result = await model.generateContent([
+                    { text: `Describe this file concisely for a software engineer. For images: what it shows, key details, any visible text. For code/text/logs: summarize the content and key points. File: ${file.name} (${file.mimetype}). Keep it under 300 words.` },
+                    { inlineData: { mimeType: file.mimetype, data: base64 } }
+                ]);
+
+                const description = result.response.text().trim();
+                parts.push(`[Attached: ${file.name}]\n${description}`);
+                this.logger.info(`Gemini described ${file.name} (${file.mimetype}, ${file.size}b): ${description.substring(0, 80)}...`);
+            } catch (e) {
+                this.logger.warn(`Failed to process file ${file.name}: ${e.message}`);
+            }
+        }
+
+        return parts.length > 0 ? parts.join('\n\n') : null;
     }
 
     /**
@@ -384,10 +465,91 @@ class SlackSocketHandler {
     }
 
     /**
+     * Summarize a long thread using Gemini Flash for concise context injection.
+     * For very large threads, truncates to last ~800KB to stay within Gemini's limits.
+     * Falls back to raw formatted messages if Gemini is unavailable.
+     */
+    async _summarizeThreadContext(messages) {
+        const formatted = await this._formatThreadContext(messages);
+        try {
+            const { GoogleGenerativeAI } = require('@google/generative-ai');
+            const apiKey = process.env.GEMINI_API_KEY;
+            if (!apiKey) {
+                this.logger.warn('GEMINI_API_KEY not set, using raw thread context');
+                return formatted;
+            }
+
+            // Truncate if too large — keep last ~800KB (Gemini Flash handles ~1M tokens)
+            const maxChars = 800000;
+            let content = formatted;
+            if (content.length > maxChars) {
+                content = '... (earlier messages truncated)\n\n' + content.slice(-maxChars);
+                this.logger.info(`Thread truncated from ${formatted.length} to ${maxChars} chars for Gemini`);
+            }
+
+            const genAI = new GoogleGenerativeAI(apiKey);
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+            const result = await model.generateContent(
+                `Summarize this Slack thread conversation concisely. Focus on: what was requested, what was done, current state, and any pending items. Keep it under 500 words.\n\n${content}`
+            );
+            const summary = result.response.text();
+            this.logger.info(`Thread summarized: ${messages.length} messages → ${summary.length} chars`);
+            return `Previous conversation summary:\n${summary}`;
+        } catch (err) {
+            this.logger.warn(`Gemini summarization failed, using raw context: ${err.message}`);
+            return formatted;
+        }
+    }
+
+    /**
+     * Detect the project path from thread history using Gemini.
+     * Looks for "start from X project" patterns and path mentions in the conversation.
+     */
+    async _detectProjectFromThread(messages) {
+        try {
+            const { GoogleGenerativeAI } = require('@google/generative-ai');
+            const apiKey = process.env.GEMINI_API_KEY;
+            if (!apiKey) return null;
+
+            const formatted = await this._formatThreadContext(messages);
+            const repoRoot = this.config.repoRoot || '';
+
+            const genAI = new GoogleGenerativeAI(apiKey);
+            const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+            const result = await model.generateContent(
+                `From this Slack thread, identify the project directory path that was being used for the Claude Code session.
+Look for patterns like:
+- "start claude from X project"
+- "Starting Claude session in /path/to/..."
+- Any file paths mentioned that indicate the project root
+
+The repo root is: ${repoRoot}
+
+Return ONLY the absolute directory path, nothing else. If you cannot determine it, return "unknown".
+
+Thread:
+${formatted}`
+            );
+            const detected = result.response.text().trim();
+            if (detected && detected !== 'unknown' && detected.startsWith('/')) {
+                this.logger.info(`Gemini detected project from thread: ${detected}`);
+                return detected;
+            }
+        } catch (err) {
+            this.logger.warn(`Gemini project detection failed: ${err.message}`);
+        }
+        return null;
+    }
+
+    /**
      * Update the last bot response timestamp for a session.
      */
     _updateLastBotTs(sessionKey, ts) {
         this._stmts.updateLastBotTs.run(ts, Date.now(), sessionKey);
+    }
+
+    _updateLastUserId(sessionKey, userId) {
+        this._stmts.updateLastUserId.run(userId, Date.now(), sessionKey);
     }
 
     // ─── Slack Event Listeners ───────────────────────────────────────
@@ -664,12 +826,12 @@ class SlackSocketHandler {
             return;
         }
 
-        await this._processCommand(channelId, threadTs, text, say, event.ts);
+        await this._processCommand(channelId, threadTs, text, say, event.ts, null, userId);
     }
 
     // ─── Command Processing ──────────────────────────────────────────
 
-    async _processCommand(channelId, threadTs, command, say, messageTs, alertMessageTs = null) {
+    async _processCommand(channelId, threadTs, command, say, messageTs, alertMessageTs = null, userId = null) {
         // Create a say function if one wasn't provided (e.g. alert triggers)
         if (!say) {
             say = async (msg) => {
@@ -680,23 +842,26 @@ class SlackSocketHandler {
         let session = this._getSession(sessionKey);
         let threadContext = null; // Will hold formatted thread messages to prepend
 
+        // Guard: slash commands on dead/missing sessions
+        const isLiveSession = session && this._isTmuxSessionAlive(session.sessionName);
+        if (command.startsWith('/') && !isLiveSession) {
+            const cmd = command.split(/\s/)[0];
+            await say({ text: `Session expired. \`${cmd}\` requires an active session — send a message first to start a new one, then use \`${cmd}\`.`, thread_ts: threadTs });
+            return;
+        }
+
         try {
             if (session && this._isTmuxSessionAlive(session.sessionName)) {
-                // Existing session — fetch only messages since last bot response
+                // Tmux alive — Claude already has full context, just inject the raw command
                 this._touchSession(sessionKey);
+                if (userId) this._updateLastUserId(sessionKey, userId);
                 this._startSessionTimeout(sessionKey);
-
-                if (session.lastBotTs) {
-                    const newMessages = await this._fetchThreadMessages(channelId, threadTs, session.lastBotTs);
-                    if (newMessages.length > 0) {
-                        threadContext = await this._formatThreadContext(newMessages);
-                        this.logger.info(`Thread context (since ${session.lastBotTs}): ${newMessages.length} messages`);
-                    }
-                }
+                // No thread context needed — Claude is already in the conversation
+                this.logger.info(`Existing live session ${session.sessionName}, injecting command directly`);
             } else if (session && !this._isTmuxSessionAlive(session.sessionName)) {
-                // Session in DB but tmux died — recreate with full thread context
-                this.logger.warn(`Tmux session ${session.sessionName} is dead, recreating...`);
-                await say({ text: 'Previous Claude session ended. Starting a new one... :rocket:', thread_ts: threadTs });
+                // Session in DB but tmux died — recreate with original repo path
+                this.logger.warn(`Tmux session ${session.sessionName} is dead, recreating in ${session.repoPath}...`);
+                await say({ text: `Resuming Claude session in \`${session.repoPath}\`... :rocket:`, thread_ts: threadTs });
 
                 const created = await this._createTmuxSession(
                     session.sessionName,
@@ -709,10 +874,14 @@ class SlackSocketHandler {
                     return;
                 }
                 this._touchSession(sessionKey);
+                if (userId) this._updateLastUserId(sessionKey, userId);
 
-                // Fetch full thread context since session was recreated
+                // Fetch thread context — summarize with Gemini if long
                 const allMessages = await this._fetchThreadMessages(channelId, threadTs);
-                if (allMessages.length > 0) {
+                if (allMessages.length > 10) {
+                    threadContext = await this._summarizeThreadContext(allMessages);
+                    this.logger.info(`Summarized thread context (recreated session): ${allMessages.length} messages`);
+                } else if (allMessages.length > 0) {
                     threadContext = await this._formatThreadContext(allMessages);
                     this.logger.info(`Full thread context (recreated session): ${allMessages.length} messages`);
                 }
@@ -763,6 +932,20 @@ class SlackSocketHandler {
                     return;
                 }
 
+                // If no project detected from command, check if this is a thread continuation
+                // and use Gemini to detect the project from thread history
+                let prefetchedMessages = null;
+                if (!rootMatch && !projectMatch && this.config.repoRoot) {
+                    prefetchedMessages = await this._fetchThreadMessages(channelId, threadTs);
+                    if (prefetchedMessages.length > 1) {
+                        const detectedPath = await this._detectProjectFromThread(prefetchedMessages);
+                        if (detectedPath && fs.existsSync(detectedPath)) {
+                            repoPath = detectedPath;
+                            this.logger.info(`Gemini detected project path: ${repoPath}`);
+                        }
+                    }
+                }
+
                 // If command was fully consumed by project pattern, default to "hi"
                 if (!command) {
                     command = 'hi';
@@ -792,19 +975,20 @@ class SlackSocketHandler {
                     alertMessageTs: alertMessageTs || null
                 };
                 this._saveSession(session);
+                if (userId) this._updateLastUserId(`${channelId}-${threadTs}`, userId);
 
-                // Fetch full thread context for brand new session
-                const allMessages = await this._fetchThreadMessages(channelId, threadTs);
-                if (allMessages.length > 0) {
+                // Fetch thread context — summarize with Gemini if this is a continuation
+                const allMessages = prefetchedMessages || await this._fetchThreadMessages(channelId, threadTs);
+                if (allMessages.length > 10) {
+                    threadContext = await this._summarizeThreadContext(allMessages);
+                    this.logger.info(`Summarized thread context (new session): ${allMessages.length} messages`);
+                } else if (allMessages.length > 0) {
                     threadContext = await this._formatThreadContext(allMessages);
                     this.logger.info(`Full thread context (new session): ${allMessages.length} messages`);
                 }
 
                 this.logger.info(`New session created: ${sessionName} for channel ${channelId}`);
-                // Alert sessions: don't start timeout until first response (investigation can take >5min)
-                if (!alertMessageTs) {
-                    this._startSessionTimeout(sessionKey);
-                }
+                this._startSessionTimeout(sessionKey);
             }
 
             // Handle /exit — clean up session
@@ -852,11 +1036,11 @@ class SlackSocketHandler {
                 } else {
                     await say({ text: `Sent \`${command}\` to Claude session.`, thread_ts: threadTs });
                 }
-                // Still poll for the eventual response
             }
 
-            // Start polling for response (pass sessionKey for tracking last_bot_ts)
-            this._pollForResponse(session, say, sessionKey);
+            // Response posting is handled by claude-hook-notify.js (Stop hook)
+            // which reads the transcript for clean markdown output.
+            // No tmux polling needed — the hook fires when Claude completes.
 
         } catch (error) {
             this.logger.error('Error processing command:', error.message);
@@ -1034,6 +1218,19 @@ class SlackSocketHandler {
                 } catch (err) {
                     this.logger.error(`Failed to send timeout/flush message: ${err.message}`);
                 }
+                // Kill unresponsive tmux — will be recreated on next user message
+                try {
+                    execSync(`tmux kill-session -t ${sessionName} 2>/dev/null`);
+                    this.logger.info(`Killed tmux session ${sessionName} after poller timeout`);
+                } catch (_) { /* already dead */ }
+                if (sessionKey) {
+                    this._clearSessionTimeout(sessionKey);
+                    const sess = this._getSession(sessionKey);
+                    if (sess?.alertMessageTs) {
+                        await this._removeReaction(sess.channelId, sess.alertMessageTs, 'eyes').catch(() => {});
+                        await this._addReaction(sess.channelId, sess.alertMessageTs, 'white_check_mark').catch(() => {});
+                    }
+                }
                 return;
             }
 
@@ -1183,7 +1380,7 @@ class SlackSocketHandler {
 
         const session = this._getSession(sessionKey);
         const isAlert = !!session?.alertMessageTs;
-        const defaultTimeout = isAlert ? 600000 : 300000; // 10min for alerts, 5min for regular
+        const defaultTimeout = isAlert ? (this.config.pollerTimeoutMs || 1800000) : 300000; // 30min for alerts (matches poller), 5min for regular
         const configTimeout = this.config.sessionInactivityTimeoutMs;
         // For alerts, use the longer default unless config explicitly exceeds it
         const timeoutMs = isAlert ? Math.max(configTimeout || 0, defaultTimeout) : (configTimeout || defaultTimeout);
@@ -1208,13 +1405,31 @@ class SlackSocketHandler {
                 this.pollers.delete(session.sessionName);
             }
 
-            // Alert sessions only: swap 👀 → ✅
-            if (session.alertMessageTs) {
-                await this._removeReaction(session.channelId, session.alertMessageTs, 'eyes');
-                await this._addReaction(session.channelId, session.alertMessageTs, 'white_check_mark');
+            // Notify user/channel about session timeout
+            try {
+                const isAlertWithUserChat = session.alertMessageTs && session.lastUserId;
+                const mention = session.lastUserId ? `<@${session.lastUserId}> ` : '';
+
+                if (session.alertMessageTs) {
+                    // Alert session: swap reactions
+                    await this._removeReaction(session.channelId, session.alertMessageTs, 'eyes');
+                    await this._addReaction(session.channelId, session.alertMessageTs, 'white_check_mark');
+                }
+
+                if (!session.alertMessageTs || isAlertWithUserChat) {
+                    // Regular session or alert+user hybrid: send timeout notice
+                    await this.app.client.chat.postMessage({
+                        channel: session.channelId,
+                        text: `${mention}Session timed out after ${minutes}min of inactivity. Send a message to resume.`,
+                        thread_ts: session.threadTs
+                    });
+                }
+            } catch (err) {
+                this.logger.warn(`Failed to send timeout notice: ${err.message}`);
             }
 
-            this._deleteSession(sessionKey);
+            // Keep DB record — repo_path and alert_message_ts preserved for session resumption.
+            // Stale entries are cleaned up by the 7-day startup cleanup.
             this.sessionTimers.delete(sessionKey);
         }, timeoutMs);
 
@@ -1226,6 +1441,35 @@ class SlackSocketHandler {
             clearTimeout(this.sessionTimers.get(sessionKey));
             this.sessionTimers.delete(sessionKey);
         }
+    }
+
+    _startSessionSweep() {
+        const SWEEP_INTERVAL = 15 * 60 * 1000; // 15 minutes
+        this._sweepInterval = setInterval(() => {
+            const sessions = this._getAllSessions();
+            let orphaned = 0;
+            let dead = 0;
+            for (const s of sessions) {
+                if (this._isTmuxSessionAlive(s.sessionName)) {
+                    if (!this.sessionTimers.has(s.sessionKey)) {
+                        this._startSessionTimeout(s.sessionKey);
+                        orphaned++;
+                        this.logger.info(`Sweep: started timeout for orphaned session ${s.sessionName}`);
+                    }
+                } else {
+                    if (s.alertMessageTs) {
+                        this._removeReaction(s.channelId, s.alertMessageTs, 'eyes').catch(() => {});
+                        this._addReaction(s.channelId, s.alertMessageTs, 'white_check_mark').catch(() => {});
+                    }
+                    this._deleteSession(s.sessionKey);
+                    this._clearSessionTimeout(s.sessionKey);
+                    dead++;
+                }
+            }
+            if (orphaned > 0 || dead > 0) {
+                this.logger.info(`Session sweep: ${orphaned} orphaned timers started, ${dead} dead sessions cleaned`);
+            }
+        }, SWEEP_INTERVAL);
     }
 
     _extractResponse(baselineOutput, currentOutput) {
@@ -1762,6 +2006,7 @@ class SlackSocketHandler {
 
         // Reconcile DB sessions with live tmux sessions
         await this._reconcileSessions();
+        this._startSessionSweep();
         this.logger.info(`[startup] reconcileSessions: ${Date.now() - t0}ms`);
 
         const t1 = Date.now();
@@ -1784,6 +2029,11 @@ class SlackSocketHandler {
     }
 
     async stop() {
+        if (this._sweepInterval) {
+            clearInterval(this._sweepInterval);
+            this._sweepInterval = null;
+        }
+
         if (this._healthCheckInterval) {
             clearInterval(this._healthCheckInterval);
             this._healthCheckInterval = null;

@@ -133,7 +133,7 @@ function ensureHooksFile() {
         if (!exists) {
             list.push({
                 matcher: '*',
-                hooks: [{ type: 'command', command, timeout: 5 }]
+                hooks: [{ type: 'command', command, timeout: 15 }]
             });
         }
         return list;
