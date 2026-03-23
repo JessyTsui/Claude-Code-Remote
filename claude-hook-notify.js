@@ -291,12 +291,7 @@ async function sendHookNotification() {
 
                 if (alreadyPosted) {
                     console.log(`Alert response already posted to ${channelId} thread=${threadTs}, skipping`);
-                    // Still swap reactions if not done yet
-                    try {
-                        const reactTs = alertMessageTs || threadTs;
-                        await web.reactions.remove({ channel: channelId, timestamp: reactTs, name: 'eyes' }).catch(() => {});
-                        await web.reactions.add({ channel: channelId, timestamp: reactTs, name: 'white_check_mark' }).catch(() => {});
-                    } catch { /* ignore */ }
+                    // Reaction swap (👀→✅) is handled by socket handler on session cleanup
                     return;
                 }
 
@@ -328,11 +323,7 @@ async function sendHookNotification() {
                     initial_comment: '_Full investigation details attached._',
                 });
 
-                // Swap reactions: 👀 → ✅
-                try {
-                    await web.reactions.remove({ channel: channelId, timestamp: threadTs, name: 'eyes' }).catch(() => {});
-                    await web.reactions.add({ channel: channelId, timestamp: threadTs, name: 'white_check_mark' }).catch(() => {});
-                } catch { /* ignore */ }
+                // Reaction swap (👀→✅) is handled by socket handler on session cleanup (timeout, /exit, or reconciliation)
 
                 console.log(`Alert response posted (${assistantMessage.length} chars) to ${channelId} thread=${threadTs}`);
             } else {
