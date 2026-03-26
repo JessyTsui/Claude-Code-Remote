@@ -206,6 +206,15 @@ process.on('SIGTERM', shutdown);
 const _rejectionLogTimes = new Map();
 const REJECTION_LOG_INTERVAL = 60000; // 1 min
 
+// WebSocket-specific error patterns to feed into the resilience tracker
+const WS_ERROR_PATTERNS = [
+    'WebSocket was closed before the connection was established',
+    'no active connection',
+    'client is not ready',
+    'Failed to send a WebSocket message',
+    'Failed to send a message as the client',
+];
+
 process.on('unhandledRejection', (reason) => {
     const msg = reason instanceof Error ? reason.message : String(reason);
     const now = Date.now();
@@ -213,5 +222,12 @@ process.on('unhandledRejection', (reason) => {
     if (now - lastLogged >= REJECTION_LOG_INTERVAL) {
         _rejectionLogTimes.set(msg, now);
         logger.error(`Unhandled rejection: ${msg}`);
+    }
+
+    // Feed WebSocket-specific rejections into the handler's error tracker
+    if (WS_ERROR_PATTERNS.some(pattern => msg.includes(pattern))) {
+        if (handler && handler._recordWsError) {
+            handler._recordWsError('unhandled_rejection', msg);
+        }
     }
 });

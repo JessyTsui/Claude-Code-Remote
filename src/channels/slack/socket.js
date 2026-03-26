@@ -40,6 +40,18 @@ class SlackSocketHandler {
         this.connected = false;
         this._healthCheckInterval = null;
 
+        // WebSocket error resilience
+        this._wsErrors = [];                  // timestamps of recent WS errors
+        this._wsErrorWindowMs = 120000;       // 2-minute sliding window
+        this._wsRestarting = false;           // prevent concurrent restarts
+        this._wsEscalationLevel = 0;         // 0=none, 1=warn, 2=restart, 3=notify, 4=exit
+        this._lastOwnerNotifyTs = 0;          // cooldown for owner DM
+        this._ownerNotifyCooldownMs = 300000; // 5 min cooldown
+        this._startedAt = Date.now();         // for uptime reporting
+        this._wsRestartWindowMs = 600000;     // 10 min window for restart tracking
+        this._wsRestartStateFile = path.join(__dirname, '../../data/ws-restart-state.json');
+        this._wsRestartTimestamps = this._loadRestartState(); // persisted across process restarts
+
         this._initDb();
 
         // Alert monitoring
@@ -565,39 +577,76 @@ ${formatted}`
 
         client.on('connected', () => {
             this.connected = true;
-            this.logger.debug('Socket Mode connected');
+            this.logger.info('Socket Mode connected');
+            // Reset in-memory error state immediately
+            this._wsErrors = [];
+            this._wsEscalationLevel = 0;
+
+            // Clear persisted restart state after 5 min of stable connection.
+            // If WS breaks again before 5 min, the restart count is preserved
+            // so the escalation can reach NOTIFY/EXIT stages.
+            if (this._wsStabilityTimer) clearTimeout(this._wsStabilityTimer);
+            this._wsStabilityTimer = setTimeout(() => {
+                if (this.connected) {
+                    this._clearRestartState();
+                    this.logger.info('WebSocket stable for 5min — cleared restart state');
+                }
+            }, 300000); // 5 min
         });
 
         client.on('disconnected', () => {
             this.connected = false;
-            this.logger.debug('Socket Mode disconnected');
+            this.logger.warn('Socket Mode disconnected');
+            this._recordWsError('disconnected', 'Socket Mode disconnected');
         });
 
         client.on('error', (error) => {
-            this.logger.debug(`Socket Mode error: ${error.message}`);
+            this.logger.warn(`Socket Mode error: ${error.message}`);
+            this._recordWsError('error', error.message);
         });
 
         client.on('close', (code, reason) => {
             this.connected = false;
-            this.logger.debug(`Socket Mode closed: code=${code} reason=${reason || 'none'}`);
+            this.logger.warn(`Socket Mode closed: code=${code} reason=${reason || 'none'}`);
+            this._recordWsError('close', `code=${code} reason=${reason || 'none'}`);
+        });
+
+        client.on('reconnecting', () => {
+            this.logger.info('Socket Mode reconnecting...');
         });
     }
 
     _startHealthCheck() {
         if (this._healthCheckInterval) return;
         let consecutiveFailures = 0;
+        let consecutiveWsDown = 0;
         const MAX_FAILURES = 3;
+        const MAX_WS_DOWN = 5; // 5 checks * 60s = 5 min of WS down while HTTP works
 
         this._healthCheckInterval = setInterval(async () => {
             try {
                 await this.app.client.auth.test();
                 consecutiveFailures = 0;
+
+                // Detect blind spot: HTTP OK but WebSocket down
                 if (!this.connected) {
-                    this.connected = true;
-                    this.logger.info('Socket Mode connection recovered');
+                    consecutiveWsDown++;
+                    this.logger.warn(`Health check OK but WebSocket down (${consecutiveWsDown}/${MAX_WS_DOWN})`);
+
+                    if (consecutiveWsDown >= MAX_WS_DOWN) {
+                        this.logger.warn(`WebSocket down for ${consecutiveWsDown}min despite healthy HTTP — escalating`);
+                        this._recordWsError('health_check', `WebSocket down for ${consecutiveWsDown}min while HTTP OK`);
+                        consecutiveWsDown = 0;
+                    }
+                } else {
+                    if (consecutiveWsDown > 0) {
+                        this.logger.info('WebSocket recovered (health check confirmed)');
+                    }
+                    consecutiveWsDown = 0;
                 }
             } catch (err) {
                 consecutiveFailures++;
+                consecutiveWsDown = 0; // HTTP also broken — different issue
                 this.connected = false;
                 if (consecutiveFailures === MAX_FAILURES) {
                     this.logger.warn(`Health check failed ${MAX_FAILURES}x — forcing full restart`);
@@ -605,15 +654,193 @@ ${formatted}`
                         await this.app.stop();
                         await this.app.start();
                         this.connected = true;
+                        this._setupConnectionMonitor(); // re-attach to new receiver.client
                         consecutiveFailures = 0;
                         this.logger.info('Bolt app restarted successfully via health check');
                     } catch (restartErr) {
                         this.logger.error(`Health check restart failed: ${restartErr.message}`);
-                        consecutiveFailures = 0; // reset to try again in 3 min
+                        this._recordWsError('health_check_restart_fail', restartErr.message);
+                        consecutiveFailures = 0;
                     }
                 }
             }
         }, 60000);
+    }
+
+    // ─── WebSocket Error Resilience ────────────────────────────────────
+
+    _loadRestartState() {
+        try {
+            if (fs.existsSync(this._wsRestartStateFile)) {
+                const data = JSON.parse(fs.readFileSync(this._wsRestartStateFile, 'utf8'));
+                const cutoff = Date.now() - this._wsRestartWindowMs;
+                const timestamps = (data.timestamps || []).filter(ts => ts > cutoff);
+                if (timestamps.length > 0) {
+                    this.logger.info(`Loaded ${timestamps.length} recent restart(s) from previous process`);
+                }
+                return timestamps;
+            }
+        } catch (err) {
+            this.logger.warn(`Failed to load restart state: ${err.message}`);
+        }
+        return [];
+    }
+
+    _saveRestartState() {
+        try {
+            const cutoff = Date.now() - this._wsRestartWindowMs;
+            this._wsRestartTimestamps = this._wsRestartTimestamps.filter(ts => ts > cutoff);
+            fs.writeFileSync(this._wsRestartStateFile, JSON.stringify({
+                timestamps: this._wsRestartTimestamps,
+                updatedAt: new Date().toISOString()
+            }));
+        } catch (err) {
+            this.logger.warn(`Failed to save restart state: ${err.message}`);
+        }
+    }
+
+    _clearRestartState() {
+        this._wsRestartTimestamps = [];
+        try {
+            if (fs.existsSync(this._wsRestartStateFile)) {
+                fs.unlinkSync(this._wsRestartStateFile);
+            }
+        } catch (err) {
+            // ignore
+        }
+    }
+
+    _getRestartsInWindow() {
+        const cutoff = Date.now() - this._wsRestartWindowMs;
+        this._wsRestartTimestamps = this._wsRestartTimestamps.filter(ts => ts > cutoff);
+        return this._wsRestartTimestamps.length;
+    }
+
+    _recordWsError(source, message) {
+        const now = Date.now();
+        this._wsErrors.push(now);
+
+        // Prune events older than the window
+        const cutoff = now - this._wsErrorWindowMs;
+        this._wsErrors = this._wsErrors.filter(ts => ts > cutoff);
+
+        const count = this._wsErrors.length;
+        const restartsInWindow = this._getRestartsInWindow();
+
+        // Escalation uses levels to ensure each stage fires exactly once per incident.
+        // On successful connection (stable), levels and restart state reset.
+        //
+        // Stages 1-2 are based on error count within the current process.
+        // Stages 3-4 are based on restart count (persisted to file), so they
+        // survive process restarts and catch the restart loop scenario.
+
+        // Stage 1: WARN (5+ errors in 2 min)
+        if (count >= 5 && this._wsEscalationLevel < 1) {
+            this._wsEscalationLevel = 1;
+            this.logger.warn(`WebSocket flapping: ${count} errors in ${this._wsErrorWindowMs / 1000}s [restarts in 10min: ${restartsInWindow}] (latest: ${source}: ${message})`);
+        }
+
+        // Stage 2: RESTART Bolt app (10+ errors in 2 min)
+        if (count >= 10 && this._wsEscalationLevel < 2) {
+            this._wsEscalationLevel = 2;
+            this.logger.warn(`WebSocket critical: ${count} errors in window — forcing Bolt restart (restart #${restartsInWindow + 1} in 10min)`);
+            this._attemptWsRecoveryRestart();
+        }
+
+        // Stage 3: NOTIFY owner (2+ restarts in 10 min — restart loop detected)
+        if (restartsInWindow >= 2 && this._wsEscalationLevel < 3) {
+            this._wsEscalationLevel = 3;
+            this.logger.warn(`WebSocket restart loop: ${restartsInWindow} restarts in 10min — notifying owner`);
+            this._notifyOwnerWsFailure(count, false, restartsInWindow);
+        }
+
+        // Stage 4: EXIT process (3+ restarts in 10 min — unrecoverable)
+        if (restartsInWindow >= 3 && this._wsEscalationLevel < 4) {
+            this._wsEscalationLevel = 4;
+            this.logger.error(`WebSocket unrecoverable: ${restartsInWindow} restarts in 10min — exiting process`);
+            this._notifyOwnerWsFailure(count, true, restartsInWindow).finally(() => {
+                process.exit(1);
+            });
+        }
+    }
+
+    async _attemptWsRecoveryRestart() {
+        if (this._wsRestarting) {
+            this.logger.debug('WebSocket recovery restart already in progress — skipping');
+            return;
+        }
+
+        this._wsRestarting = true;
+
+        // Record this restart attempt to file (survives process restarts)
+        this._wsRestartTimestamps.push(Date.now());
+        this._saveRestartState();
+
+        const restartsInWindow = this._getRestartsInWindow();
+        this.logger.warn(`WebSocket recovery restart attempt (${restartsInWindow} in last 10min)`);
+
+        try {
+            await this.app.stop();
+            await new Promise(r => setTimeout(r, 2000));
+            await this.app.start();
+            this.connected = true;
+            this._setupConnectionMonitor(); // re-attach events to new receiver.client
+            this._wsErrors = [];
+            // Reset escalation level so _recordWsError can re-evaluate stages.
+            // Restart timestamps are NOT reset here — they persist in the file.
+            // If WS breaks again quickly, the restart count will trigger NOTIFY/EXIT.
+            // Timestamps only clear after 5 min of stable connection (see 'connected' handler).
+            this._wsEscalationLevel = 0;
+            this.logger.info('WebSocket recovery restart succeeded');
+        } catch (err) {
+            this.logger.error(`WebSocket recovery restart failed: ${err.message}`);
+            if (restartsInWindow >= 2) {
+                this.logger.error(`${restartsInWindow} restart failures in 10min — notifying owner and exiting`);
+                await this._notifyOwnerWsFailure(this._wsErrors.length, true, restartsInWindow);
+                process.exit(1);
+            }
+        } finally {
+            this._wsRestarting = false;
+        }
+    }
+
+    async _notifyOwnerWsFailure(errorCount, isExiting = false, restartsInWindow = 0) {
+        const ownerId = this.config.ownerUserId;
+        if (!ownerId) {
+            this.logger.warn('Cannot notify owner: SLACK_OWNER_USER_ID not configured');
+            return;
+        }
+
+        const now = Date.now();
+        if (!isExiting && now - this._lastOwnerNotifyTs < this._ownerNotifyCooldownMs) {
+            this.logger.debug('Owner notification skipped (cooldown)');
+            return;
+        }
+        this._lastOwnerNotifyTs = now;
+
+        const uptimeMin = Math.round((now - this._startedAt) / 60000);
+        const restarts = restartsInWindow || this._getRestartsInWindow();
+        const action = isExiting
+            ? 'Process is exiting for PM2/systemd restart.'
+            : 'Restart loop detected — please check the agent.';
+
+        const text = [
+            `:rotating_light: *WebSocket Connection Failure*`,
+            `*Errors:* ${errorCount} in the last ${this._wsErrorWindowMs / 1000}s`,
+            `*Restarts in last 10min:* ${restarts}`,
+            `*Uptime:* ${uptimeMin} minutes`,
+            `*Action:* ${action}`,
+        ].join('\n');
+
+        try {
+            await this.app.client.chat.postMessage({
+                channel: ownerId,
+                text,
+            });
+            this.logger.info('Owner notified of WebSocket failure via DM');
+        } catch (err) {
+            this.logger.error(`Failed to notify owner: ${err.message}`);
+        }
     }
 
     _setupListeners() {
@@ -1785,10 +2012,16 @@ ${formatted}`
         httpApp.get('/', (req, res) => {
             const sessions = this._getAllSessions();
             const aliveSessions = sessions.filter(s => this._isTmuxSessionAlive(s.sessionName));
+            const recentErrors = this._wsErrors.filter(ts => ts > Date.now() - this._wsErrorWindowMs).length;
+            const status = this.connected && recentErrors < 5
+                ? 'ok'
+                : (recentErrors >= 10 ? 'critical' : 'degraded');
             res.json({
-                status: this.connected ? 'ok' : 'degraded',
+                status,
                 service: 'claude-code-remote-slack',
                 socketConnected: this.connected,
+                wsErrorsInWindow: recentErrors,
+                wsRestartsIn10min: this._getRestartsInWindow(),
                 uptime: process.uptime(),
                 sessions: aliveSessions.length,
                 totalSessionsInDb: sessions.length
@@ -2037,6 +2270,11 @@ ${formatted}`
         if (this._healthCheckInterval) {
             clearInterval(this._healthCheckInterval);
             this._healthCheckInterval = null;
+        }
+
+        if (this._wsStabilityTimer) {
+            clearTimeout(this._wsStabilityTimer);
+            this._wsStabilityTimer = null;
         }
 
         if (this.httpServer) {
