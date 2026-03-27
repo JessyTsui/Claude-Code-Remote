@@ -16,7 +16,7 @@ services:
       - APP_MODE=cloud
 
     ports:
-      - "${SLACK_HTTP_PORT:-9999}:9999"
+      - "127.0.0.1:${SLACK_HTTP_PORT:-9999}:9999"
 
     volumes:
       # Persistent data (SQLite DB, reports, WebSocket state)
