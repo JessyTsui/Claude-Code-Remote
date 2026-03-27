@@ -50,6 +50,8 @@ const config = {
     dailySummaryModel: process.env.DAILY_SUMMARY_MODEL || 'sonnet',
     xoxcToken: process.env.SLACK_XOXC_TOKEN || '',
     xoxdToken: process.env.SLACK_XOXD_TOKEN || '',
+    // App mode: 'local' (mentions only), 'cloud' (monitors + summary only), 'all' (everything)
+    appMode: (process.env.APP_MODE || 'all').toLowerCase(),
 };
 
 // Validate configuration
@@ -168,6 +170,7 @@ async function start() {
     logger.info(`- Delay Alert Skill: ${config.delayAlertSkill}`);
     logger.info(`- Delay Alert Threshold: ${config.delayAlertThreshold} alerts in ${config.delayAlertWindowMs}ms`);
     logger.info(`- Daily Summary: ${config.dailySummaryChannels ? `${config.dailySummaryTime} → ${config.dailySummaryChannels}` : 'Not configured'}`);
+    logger.info(`- App Mode: ${config.appMode}`);
 
     await handler.start();
     logger.info('Slack Socket Mode is running. Listening for messages...');
@@ -178,8 +181,8 @@ async function start() {
         scheduleDailyRestart(restartHour);
     }
 
-    // Schedule daily summary if configured
-    if (config.dailySummaryChannels) {
+    // Schedule daily summary if configured (skip in local mode)
+    if (config.dailySummaryChannels && config.appMode !== 'local') {
         scheduleDailySummary(config.dailySummaryTime);
     }
 }

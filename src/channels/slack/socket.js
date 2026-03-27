@@ -844,8 +844,25 @@ ${formatted}`
     }
 
     _setupListeners() {
+        const mode = this.config.appMode || 'all';
+
         this.app.event('app_mention', async ({ event, say }) => {
             try {
+                // cloud mode: only handle mentions in monitored channels (alert threads)
+                // local mode: only handle mentions in non-monitored channels (main chat)
+                // This prevents duplicate responses when both instances receive the same event
+                if (mode === 'cloud' || mode === 'local') {
+                    const channelId = event.channel;
+                    const isMonitorChannel = this.alertMonitor.isMonitoredChannel(channelId) || this.delayAlertMonitor.isMonitoredChannel(channelId);
+                    if (mode === 'cloud' && !isMonitorChannel) {
+                        this.logger.info(`App mode=cloud: ignoring mention in non-monitor channel ${channelId}`);
+                        return;
+                    }
+                    if (mode === 'local' && isMonitorChannel) {
+                        this.logger.info(`App mode=local: ignoring mention in monitor channel ${channelId}`);
+                        return;
+                    }
+                }
                 await this._handleMention(event, say);
             } catch (err) {
                 if (err.message && (err.message.includes('no active connection') || err.message.includes('client is not ready'))) {
@@ -856,19 +873,23 @@ ${formatted}`
             }
         });
 
-        // Listen for all messages in monitored channels
-        this.app.event('message', async ({ event }) => {
-            try {
-                await this._handleMonitoredMessage(event);
-                await this._handleDelayAlertMessage(event);
-            } catch (err) {
-                if (err.message && (err.message.includes('no active connection') || err.message.includes('client is not ready'))) {
-                    this.logger.warn(`Message handler failed (disconnected): ${err.message}`);
-                } else {
-                    throw err;
+        // Monitor channels + delay alerts: enabled in 'cloud' and 'all' modes
+        if (mode !== 'local') {
+            this.app.event('message', async ({ event }) => {
+                try {
+                    await this._handleMonitoredMessage(event);
+                    await this._handleDelayAlertMessage(event);
+                } catch (err) {
+                    if (err.message && (err.message.includes('no active connection') || err.message.includes('client is not ready'))) {
+                        this.logger.warn(`Message handler failed (disconnected): ${err.message}`);
+                    } else {
+                        throw err;
+                    }
                 }
-            }
-        });
+            });
+        } else {
+            this.logger.info('App mode=local: monitor channels and delay alerts disabled');
+        }
     }
 
     async _handleMonitoredMessage(event) {

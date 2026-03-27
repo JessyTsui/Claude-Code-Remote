@@ -1,0 +1,48 @@
+services:
+  claude-code-remote:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claude-code-remote
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      - NODE_ENV=production
+      - SHELL=/bin/bash
+      - SLACK_REPO_PATH=/workspace
+      - APP_MODE=cloud
+
+    ports:
+      - "${SLACK_HTTP_PORT:-9999}:9999"
+
+    volumes:
+      # Persistent data (SQLite DB, reports, WebSocket state)
+      - claude-data:/app/src/data
+      # Workspace for Claude sessions
+      - ${HOST_WORKSPACE_PATH:-.}:/workspace
+
+    # Required for tmux pseudo-terminal allocation
+    tty: true
+    stdin_open: true
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9999/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    stop_grace_period: 15s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+
+volumes:
+  claude-data:
+    driver: local
