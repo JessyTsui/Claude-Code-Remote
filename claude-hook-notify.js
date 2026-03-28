@@ -21,7 +21,7 @@ const projectDir = path.dirname(__filename);
 const envPath = path.join(projectDir, '.env');
 
 if (fs.existsSync(envPath)) {
-    dotenv.config({ path: envPath });
+    dotenv.config({ path: envPath, override: true });
 } else {
     console.error('.env file not found at:', envPath);
     process.exit(1);
@@ -204,56 +204,100 @@ async function sendHookNotification() {
     // Read hook input from stdin (Claude Code passes last_assistant_message, transcript_path, etc.)
     const hookInput = await readStdin();
 
-    // Get current tmux session name
-    let tmuxSession = null;
-    try {
-        tmuxSession = execSync('tmux display-message -p "#S"', {
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore']
-        }).trim();
-    } catch {
-        // Not in tmux
-    }
-
-    // Only act on slack-* tmux sessions (remote sessions spawned by the Slack bot).
-    // Skip local/dev sessions to avoid noisy notifications.
-    if (!tmuxSession || !tmuxSession.startsWith('slack-')) {
+    // Skip non-remote sessions: only proceed if SLACK_SESSION_KEY is set (bot sets this
+    // in tmux env when creating sessions). No fallback — wrong thread is worse than silence.
+    const slackSessionKey = process.env.SLACK_SESSION_KEY;
+    if (!slackSessionKey) {
         process.exit(0);
     }
 
-    // Determine channel/thread from DB
-    let channelId = process.env.SLACK_CHANNEL_ID;
-    let threadTs = undefined;
-    let isAlertSession = false;
-    let alertMessageTs = null;
-    let lastUserId = null;
+    // ─── SessionStart: register claude session_id in DB ──────────────
+    if (notificationType === 'session_start') {
+        const sessionId = hookInput.session_id;
+        if (!sessionId || !slackSessionKey) {
+            process.exit(0);
+        }
 
-    if (tmuxSession) {
         try {
             const Database = require('better-sqlite3');
             const dbPath = path.join(projectDir, 'src/data/slack-sessions.db');
 
             if (fs.existsSync(dbPath)) {
-                const db = new Database(dbPath, { readonly: true });
-                const row = db.prepare('SELECT * FROM sessions WHERE session_name = ?').get(tmuxSession);
+                const db = new Database(dbPath);
+                db.pragma('journal_mode = WAL');
+                // Only set claude_session_id if not already set (preserve root/parent session).
+                // Subagents (Agent tool) inherit SLACK_SESSION_KEY and fire their own SessionStart,
+                // but we only want the root session's Stop hook to post alert responses.
+                const result = db.prepare(
+                    'UPDATE sessions SET claude_session_id = COALESCE(claude_session_id, ?), updated_at = ? WHERE session_key = ?'
+                ).run(sessionId, Date.now(), slackSessionKey);
                 db.close();
-
-                if (row) {
-                    channelId = row.channel_id;
-                    threadTs = row.thread_ts;
-                    isAlertSession = !!row.alert_message_ts;
-                    alertMessageTs = row.alert_message_ts || null;
-                    lastUserId = row.last_user_id || null;
-                }
+                console.log(`SessionStart: mapped session_id=${sessionId} to key=${slackSessionKey} (rows=${result.changes})`);
             }
         } catch (error) {
-            console.error('DB lookup failed:', error.message);
+            console.error('SessionStart DB update failed:', error.message);
         }
+
+        process.exit(0);
     }
 
-    if (!channelId) {
-        console.error('No SLACK_CHANNEL_ID configured and no session found');
-        process.exit(1);
+    // ─── Stop/SubagentStop: resolve session from DB ──────────────────
+    let channelId = process.env.SLACK_CHANNEL_ID;
+    let threadTs = undefined;
+    let isAlertSession = false;
+    let alertMessageTs = null;
+    let lastUserId = null;
+    let rootSessionId = null;
+
+    try {
+        const Database = require('better-sqlite3');
+        const dbPath = path.join(projectDir, 'src/data/slack-sessions.db');
+
+        if (fs.existsSync(dbPath)) {
+            const db = new Database(dbPath, { readonly: true });
+            let row = null;
+
+            // Strategy 1: lookup by SLACK_SESSION_KEY env var (direct primary-key match, always correct)
+            if (slackSessionKey) {
+                row = db.prepare(
+                    'SELECT * FROM sessions WHERE session_key = ?'
+                ).get(slackSessionKey);
+                if (row) {
+                    console.log(`Resolved via SLACK_SESSION_KEY=${slackSessionKey}`);
+                }
+            }
+
+            // Strategy 2: lookup by claude session_id (works for Stop, may fail for SubagentStop)
+            if (!row && hookInput.session_id) {
+                row = db.prepare(
+                    'SELECT * FROM sessions WHERE claude_session_id = ? LIMIT 1'
+                ).get(hookInput.session_id);
+                if (row) {
+                    console.log(`Resolved via session_id=${hookInput.session_id}`);
+                }
+            }
+
+            // No fallback — sending to the wrong thread is worse than no notification.
+            // SLACK_SESSION_KEY and claude_session_id are the only reliable lookups.
+
+            db.close();
+
+            if (row) {
+                channelId = row.channel_id;
+                threadTs = row.thread_ts;
+                isAlertSession = !!row.alert_message_ts;
+                alertMessageTs = row.alert_message_ts || null;
+                lastUserId = row.last_user_id || null;
+                rootSessionId = row.claude_session_id || null;
+            }
+        }
+    } catch (error) {
+        console.error('DB lookup failed:', error.message);
+    }
+
+    if (!channelId || !threadTs) {
+        console.error('No session found — cannot post to Slack');
+        process.exit(0);
     }
 
     if (!process.env.SLACK_BOT_TOKEN) {
@@ -274,7 +318,24 @@ async function sendHookNotification() {
     if (assistantMessage && threadTs) {
         try {
             if (isAlertSession) {
-                // Alert session: check if we already posted a response (avoid duplicates from multiple Stop events)
+                // Alert sessions: only post on final Stop (completed), not SubagentStop (waiting).
+                // SubagentStop fires for every subagent during investigation and would post
+                // intermediate garbage (skill file contents, etc.) as "Recommended Action".
+                if (notificationType !== 'completed') {
+                    console.log(`Alert session: skipping ${notificationType} (only post on completed)`);
+                    return;
+                }
+
+                // Only allow the root/parent session to post. Subagents (Agent tool) inherit
+                // SLACK_SESSION_KEY and fire their own Stop hooks — their last_assistant_message
+                // is often skill file contents or intermediate output, not the investigation report.
+                // SessionStart uses COALESCE to preserve the root session_id.
+                if (rootSessionId && hookInput.session_id && hookInput.session_id !== rootSessionId) {
+                    console.log(`Alert session: skipping Stop from subagent (hook=${hookInput.session_id}, root=${rootSessionId})`);
+                    return;
+                }
+
+                // Check if we already posted a response (avoid duplicates from multiple Stop events)
                 let alreadyPosted = false;
                 try {
                     const replies = await web.conversations.replies({
@@ -283,7 +344,7 @@ async function sendHookNotification() {
                         limit: 50
                     });
                     alreadyPosted = (replies.messages || []).some(m =>
-                        (m.bot_id || m.app_id) && m.text?.includes('Recommended Action:')
+                        m.ts !== threadTs && m.text?.includes('Recommended Action:')
                     );
                 } catch {
                     // If check fails, proceed with posting
@@ -296,8 +357,12 @@ async function sendHookNotification() {
                 }
 
                 // Post summary + upload full report
-                const match = assistantMessage.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*|$)/i);
-                const summary = match ? match[1].trim() : assistantMessage.substring(0, 500).trim();
+                const match = assistantMessage.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*)/i);
+                const summary = match ? match[1].trim() : (
+                    // Fallback: take text between "Recommended Action:" and next double newline, or first 500 chars
+                    assistantMessage.match(/Recommended Action:\s*(.+(?:\n(?!\n).+)*)/i)?.[1]?.trim()
+                    || assistantMessage.substring(0, 500).trim()
+                );
 
                 const alertBlocks = [
                     { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${summary}` } }

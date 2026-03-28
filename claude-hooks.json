@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /path/to/Claude-Code-Remote/claude-hook-notify.js session_start",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "*",

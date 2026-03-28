@@ -106,12 +106,20 @@ class SlackSocketHandler {
         } catch {
             // Column already exists
         }
+        try {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN claude_session_id TEXT');
+        } catch {
+            // Column already exists
+        }
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_claude_session_id ON sessions(claude_session_id)');
 
         this._stmts = {
             upsert: this.db.prepare(`
                 INSERT INTO sessions (session_key, session_name, channel_id, thread_ts, repo_path, created_at, updated_at, alert_message_ts)
                 VALUES (@session_key, @session_name, @channel_id, @thread_ts, @repo_path, @created_at, @updated_at, @alert_message_ts)
-                ON CONFLICT(session_key) DO UPDATE SET updated_at = @updated_at
+                ON CONFLICT(session_key) DO UPDATE SET
+                    updated_at = @updated_at,
+                    claude_session_id = NULL
             `),
             get: this.db.prepare('SELECT * FROM sessions WHERE session_key = ?'),
             all: this.db.prepare('SELECT * FROM sessions ORDER BY updated_at DESC'),
@@ -119,7 +127,10 @@ class SlackSocketHandler {
             deleteOld: this.db.prepare('DELETE FROM sessions WHERE updated_at < ?'),
             touch: this.db.prepare('UPDATE sessions SET updated_at = ? WHERE session_key = ?'),
             updateLastBotTs: this.db.prepare('UPDATE sessions SET last_bot_ts = ?, updated_at = ? WHERE session_key = ?'),
-            updateLastUserId: this.db.prepare('UPDATE sessions SET last_user_id = ?, updated_at = ? WHERE session_key = ?')
+            updateLastUserId: this.db.prepare('UPDATE sessions SET last_user_id = ?, updated_at = ? WHERE session_key = ?'),
+            deleteByNameExcept: this.db.prepare('DELETE FROM sessions WHERE session_name = ? AND session_key != ?'),
+            getByClaudeSessionId: this.db.prepare('SELECT * FROM sessions WHERE claude_session_id = ? LIMIT 1'),
+            updateClaudeSessionId: this.db.prepare('UPDATE sessions SET claude_session_id = ?, updated_at = ? WHERE session_key = ?')
         };
 
         // Clean up sessions older than 7 days
@@ -131,8 +142,13 @@ class SlackSocketHandler {
     }
 
     _saveSession(session) {
+        const sessionKey = `${session.channelId}-${session.threadTs}`;
+        // Remove stale DB entries with the same tmux session name (from timed-out sessions
+        // whose threadTs produced the same 6-digit suffix). Without this, the hook's
+        // session_name lookup could return the old/wrong thread.
+        this._stmts.deleteByNameExcept.run(session.sessionName, sessionKey);
         this._stmts.upsert.run({
-            session_key: `${session.channelId}-${session.threadTs}`,
+            session_key: sessionKey,
             session_name: session.sessionName,
             channel_id: session.channelId,
             thread_ts: session.threadTs,
@@ -154,7 +170,8 @@ class SlackSocketHandler {
             createdAt: row.created_at,
             lastBotTs: row.last_bot_ts || null,
             alertMessageTs: row.alert_message_ts || null,
-            lastUserId: row.last_user_id || null
+            lastUserId: row.last_user_id || null,
+            claudeSessionId: row.claude_session_id || null
         };
     }
 
@@ -167,7 +184,8 @@ class SlackSocketHandler {
             repoPath: row.repo_path,
             createdAt: row.created_at,
             updatedAt: row.updated_at,
-            alertMessageTs: row.alert_message_ts || null
+            alertMessageTs: row.alert_message_ts || null,
+            claudeSessionId: row.claude_session_id || null
         }));
     }
 
@@ -1092,7 +1110,7 @@ ${formatted}`
 
         // Guard: slash commands on dead/missing sessions
         const isLiveSession = session && this._isTmuxSessionAlive(session.sessionName);
-        if (command.startsWith('/') && !isLiveSession) {
+        if (command.startsWith('/') && !isLiveSession && !(command === '/exit' && session)) {
             const cmd = command.split(/\s/)[0];
             await say({ text: `Session expired. \`${cmd}\` requires an active session — send a message first to start a new one, then use \`${cmd}\`.`, thread_ts: threadTs });
             return;
@@ -1114,7 +1132,8 @@ ${formatted}`
                 const created = await this._createTmuxSession(
                     session.sessionName,
                     session.repoPath,
-                    this.config.claudeCommand || 'claude --dangerously-skip-permissions'
+                    this.config.claudeCommand || 'claude --dangerously-skip-permissions',
+                    sessionKey
                 );
                 if (!created) {
                     await say({ text: 'Failed to create Claude session. Is tmux installed?', thread_ts: threadTs });
@@ -1203,7 +1222,7 @@ ${formatted}`
                     await say({ text: `Starting Claude session in \`${repoPath}\`... :rocket:`, thread_ts: threadTs });
                 }
 
-                const created = await this._createTmuxSession(sessionName, repoPath, claudeCmd);
+                const created = await this._createTmuxSession(sessionName, repoPath, claudeCmd, sessionKey);
                 if (!created) {
                     if (alertMessageTs) {
                         await this._removeReaction(channelId, alertMessageTs, 'eyes');
@@ -1241,7 +1260,9 @@ ${formatted}`
 
             // Handle /exit — clean up session
             if (command === '/exit') {
-                await this._injectCommand(session.sessionName, command);
+                if (this._isTmuxSessionAlive(session.sessionName)) {
+                    await this._injectCommand(session.sessionName, command);
+                }
                 this._deleteSession(sessionKey);
                 this._clearSessionTimeout(sessionKey);
                 const pollKey = session.sessionName;
@@ -1299,11 +1320,11 @@ ${formatted}`
     // ─── Tmux Management ─────────────────────────────────────────────
 
     _generateSessionName(channelId, threadTs) {
-        const suffix = threadTs.replace('.', '').slice(-6);
+        const suffix = threadTs.replace('.', '').slice(-12);
         return `slack-${channelId.slice(-4)}-${suffix}`;
     }
 
-    async _createTmuxSession(sessionName, repoPath, claudeCmd) {
+    async _createTmuxSession(sessionName, repoPath, claudeCmd, sessionKey = null) {
         try {
             execSync('which tmux', { stdio: 'ignore' });
         } catch {
@@ -1321,7 +1342,7 @@ ${formatted}`
 
         return new Promise((resolve) => {
             const { buildTmuxCommand } = require('../../utils/tmux-helper');
-            const cmd = buildTmuxCommand(sessionName, repoPath, claudeCmd);
+            const cmd = buildTmuxCommand(sessionName, repoPath, claudeCmd, sessionKey);
             this.logger.info(`Creating tmux session: ${cmd}`);
 
             exec(cmd, (error) => {
@@ -1364,34 +1385,49 @@ ${formatted}`
     }
 
     async _injectCommand(sessionName, command) {
-        return new Promise((resolve, reject) => {
-            exec(`tmux send-keys -t ${sessionName} C-u`, (clearErr) => {
-                if (clearErr) {
-                    reject(new Error(`Failed to clear input: ${clearErr.message}`));
+        const os = require('os');
+        const tmpFile = path.join(os.tmpdir(), `claude-inject-${sessionName}-${Date.now()}.txt`);
+        try {
+            // Write command to temp file to avoid shell argument length limits
+            fs.writeFileSync(tmpFile, command);
+
+            // Clear current input
+            execSync(`tmux send-keys -t ${sessionName} C-u`);
+
+            // Load text into tmux paste buffer and paste it (handles any length/special chars)
+            execSync(`tmux load-buffer ${tmpFile}`);
+            execSync(`tmux paste-buffer -t ${sessionName}`);
+
+            // Wait for Claude Code to process the bracketed paste — longer texts need more time.
+            // paste-buffer wraps content in escape sequences that Claude Code must parse before
+            // it can accept Enter. 500ms is not enough for multi-line pastes.
+            const baseDelay = 1000;
+            const perLineDelay = Math.min(command.split('\n').length * 100, 3000);
+            await new Promise(r => setTimeout(r, baseDelay + perLineDelay));
+
+            // Send Enter and verify it was accepted — retry if Claude still shows pasted text
+            for (let attempt = 0; attempt < 3; attempt++) {
+                execSync(`tmux send-keys -t ${sessionName} Enter`);
+                await new Promise(r => setTimeout(r, 1500));
+
+                const output = this._captureOutput(sessionName);
+                // If Claude is working (no idle prompt with pasted text), Enter was accepted
+                const hasPastedIndicator = output.includes('[Pasted text');
+                const isWorking = output.includes('Clauding') || output.includes('Working') ||
+                    output.includes('Thinking') || output.includes('Flibbertigibbeting');
+                if (isWorking || !hasPastedIndicator) {
+                    if (attempt > 0) {
+                        this.logger.info(`Enter accepted on retry ${attempt + 1} for ${sessionName}`);
+                    }
                     return;
                 }
-
-                setTimeout(() => {
-                    const escaped = command.replace(/'/g, "'\"'\"'");
-                    exec(`tmux send-keys -t ${sessionName} -l '${escaped}'`, (sendErr) => {
-                        if (sendErr) {
-                            reject(new Error(`Failed to send command: ${sendErr.message}`));
-                            return;
-                        }
-
-                        setTimeout(() => {
-                            exec(`tmux send-keys -t ${sessionName} C-m`, (enterErr) => {
-                                if (enterErr) {
-                                    reject(new Error(`Failed to send enter: ${enterErr.message}`));
-                                    return;
-                                }
-                                resolve();
-                            });
-                        }, 200);
-                    });
-                }, 200);
-            });
-        });
+                this.logger.warn(`Enter not accepted (attempt ${attempt + 1}), retrying for ${sessionName}`);
+            }
+            this.logger.warn(`Enter may not have been accepted after 3 attempts for ${sessionName}`);
+        } finally {
+            // Clean up temp file
+            try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+        }
     }
 
     _captureOutput(sessionName) {
@@ -1872,12 +1908,16 @@ ${formatted}`
      * Looks for text between "Recommended Action:" and the next "---" or section boundary.
      */
     _extractRecommendedAction(response) {
-        // Match "Recommended Action:" followed by content, up to next "---" or end
-        const match = response.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*|$)/i);
+        // Match "Recommended Action:" followed by content, up to next "---" or "##" or "**"
+        const match = response.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*)/i);
         if (match) {
             return match[1].trim();
         }
-        // Fallback: return first 500 chars
+        // Fallback: take first paragraph after "Recommended Action:", or first 500 chars
+        const paraMatch = response.match(/Recommended Action:\s*(.+(?:\n(?!\n).+)*)/i);
+        if (paraMatch) {
+            return paraMatch[1].trim();
+        }
         return response.substring(0, 500).trim();
     }
 

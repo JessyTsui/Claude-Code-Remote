@@ -50,10 +50,19 @@ function removeHook(list) {
 function install() {
     const settings = loadSettings();
     settings.hooks = settings.hooks || {};
+    settings.hooks.SessionStart = settings.hooks.SessionStart || [];
     settings.hooks.Stop = settings.hooks.Stop || [];
     settings.hooks.SubagentStop = settings.hooks.SubagentStop || [];
 
     let changed = false;
+
+    if (!hasHook(settings.hooks.SessionStart)) {
+        settings.hooks.SessionStart.push({
+            matcher: '*',
+            hooks: [{ type: 'command', command: `node ${hookScript} session_start`, timeout: TIMEOUT }]
+        });
+        changed = true;
+    }
 
     if (!hasHook(settings.hooks.Stop)) {
         settings.hooks.Stop.push({
@@ -74,7 +83,8 @@ function install() {
     if (changed) {
         saveSettings(settings);
         console.log('Hooks installed in', settingsPath);
-        console.log('  Stop        →', `node ${hookScript} completed`);
+        console.log('  SessionStart →', `node ${hookScript} session_start`);
+        console.log('  Stop         →', `node ${hookScript} completed`);
         console.log('  SubagentStop →', `node ${hookScript} waiting`);
     } else {
         console.log('Hooks already installed.');
@@ -96,6 +106,12 @@ function uninstall() {
         changed = true;
     }
 
+    if (hasHook(settings.hooks.SessionStart)) {
+        settings.hooks.SessionStart = removeHook(settings.hooks.SessionStart);
+        if (!settings.hooks.SessionStart) delete settings.hooks.SessionStart;
+        changed = true;
+    }
+
     if (hasHook(settings.hooks.SubagentStop)) {
         settings.hooks.SubagentStop = removeHook(settings.hooks.SubagentStop);
         if (!settings.hooks.SubagentStop) delete settings.hooks.SubagentStop;
@@ -112,10 +128,12 @@ function uninstall() {
 
 function status() {
     const settings = loadSettings();
+    const sessionStartInstalled = hasHook(settings.hooks?.SessionStart);
     const stopInstalled = hasHook(settings.hooks?.Stop);
     const subagentInstalled = hasHook(settings.hooks?.SubagentStop);
 
     console.log('Claude-Code-Remote hooks status:');
+    console.log(`  SessionStart  ${sessionStartInstalled ? '✓ installed' : '✗ not installed'}`);
     console.log(`  Stop          ${stopInstalled ? '✓ installed' : '✗ not installed'}`);
     console.log(`  SubagentStop  ${subagentInstalled ? '✓ installed' : '✗ not installed'}`);
     console.log(`  Settings file: ${settingsPath}`);

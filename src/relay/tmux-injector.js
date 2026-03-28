@@ -115,7 +115,8 @@ class TmuxInjector {
                                 return;
                             }
                             
-                            // Brief wait
+                            // Wait for paste to be processed — longer texts need more time
+                            const enterDelay = Math.min(100 + Math.floor(command.length / 50) * 50, 2000);
                             setTimeout(() => {
                                 exec(enterCommand, async (enterError) => {
                                     if (enterError) {
