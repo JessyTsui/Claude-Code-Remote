@@ -2085,6 +2085,16 @@ ${formatted}`
                                 content: { 'application/json': { schema: { type: 'object', properties: { sessions: { type: 'array', items: { type: 'object' } } } } } }
                             }
                         }
+                    },
+                    delete: {
+                        summary: 'Kill all Claude tmux sessions and clean up',
+                        description: 'Kills all tmux sessions, stops pollers, clears timers, and deletes DB records.',
+                        responses: {
+                            '200': {
+                                description: 'Sessions killed',
+                                content: { 'application/json': { schema: { type: 'object', properties: { killed: { type: 'number' }, already_dead: { type: 'number' } } } } }
+                            }
+                        }
                     }
                 },
                 '/daily-summary': {
@@ -2277,6 +2287,43 @@ ${formatted}`
                 updatedAt: new Date(s.updatedAt).toISOString()
             }));
             res.json({ sessions });
+        });
+
+        httpApp.delete('/sessions', (req, res) => {
+            const sessions = this._getAllSessions();
+            let killed = 0;
+            let alreadyDead = 0;
+
+            for (const s of sessions) {
+                // Kill tmux
+                if (this._isTmuxSessionAlive(s.sessionName)) {
+                    try { execSync(`tmux kill-session -t ${s.sessionName} 2>/dev/null`); } catch (_) {}
+                    killed++;
+                } else {
+                    alreadyDead++;
+                }
+
+                // Stop poller
+                if (this.pollers.has(s.sessionName)) {
+                    clearInterval(this.pollers.get(s.sessionName).interval);
+                    this.pollers.delete(s.sessionName);
+                }
+
+                // Clear timer
+                this._clearSessionTimeout(s.sessionKey);
+
+                // Swap alert reactions
+                if (s.alertMessageTs) {
+                    this._removeReaction(s.channelId, s.alertMessageTs, 'eyes').catch(() => {});
+                    this._addReaction(s.channelId, s.alertMessageTs, 'white_check_mark').catch(() => {});
+                }
+
+                // Delete DB record
+                this._deleteSession(s.sessionKey);
+            }
+
+            this.logger.info(`DELETE /sessions: ${killed} killed, ${alreadyDead} already dead, ${sessions.length} DB records removed`);
+            res.json({ killed, already_dead: alreadyDead });
         });
 
         // ─── Daily Summary ────────────────────────────────────
