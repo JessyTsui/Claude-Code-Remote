@@ -169,6 +169,22 @@ At the scheduled time (or via `POST /daily-summary`):
 3. Summarizes via Claude Agent SDK — key discussions, decisions, action items, shared links
 4. DMs the summary to the owner (or posts to `SLACK_CHANNEL_ID`)
 
+## App Mode
+
+`APP_MODE` controls which features each instance handles, allowing local and cloud instances to run simultaneously on the same Slack app without duplicate responses.
+
+| Mode | @Mention (main channel) | @Mention (monitor threads) | Alert monitoring | Delay monitoring | Daily summary |
+|------|------------------------|---------------------------|-----------------|-----------------|---------------|
+| `local` | Yes | No | No | No | No |
+| `cloud` | No | Yes | Yes | Yes | Yes |
+| `all` (default) | Yes | Yes | Yes | Yes | Yes |
+
+**Typical split setup:**
+- **Cloud/VPS:** `APP_MODE=cloud` — handles PagerDuty alerts, delay alerts, daily summaries, and chat within monitor threads
+- **Local machine:** `APP_MODE=local` — handles direct @mention chat in `SLACK_CHANNEL_ID`
+
+Both connect via Slack Socket Mode. Each instance ignores events it's not responsible for.
+
 ## Architecture
 
 See [`docs/architecture.md`](./docs/architecture.md) for detailed data flow diagrams, class references, and the full file map.
@@ -199,6 +215,9 @@ See [`docs/architecture.md`](./docs/architecture.md) for detailed data flow diag
 ```bash
 # Test the hook directly
 node claude-hook-notify.js completed
+
+# Check hooks are installed
+npm run hooks:status
 
 # Check Claude is running in a tmux session that the hook can find
 tmux list-sessions

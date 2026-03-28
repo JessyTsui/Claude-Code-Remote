@@ -85,10 +85,33 @@ All state is file-based:
 4. Passes formatted messages to Claude Agent SDK for summarization (single turn, no tools needed)
 5. DMs combined summary to owner or posts to `SLACK_CHANNEL_ID`, splitting long messages into thread replies
 
+## Hooks (Critical for Slack Notifications)
+
+Claude Code hooks (`Stop` and `SubagentStop`) are how the bot knows Claude finished a task and posts notifications to Slack. They are registered in `~/.claude/settings.json` and call `claude-hook-notify.js`.
+
+**If a user reports the bot is not sending messages to Slack after Claude completes a task**, the most likely cause is hooks not being installed. Debug with:
+- `npm run hooks:status` — check if hooks are registered
+- `cat ~/.claude/settings.json` — verify hook commands point to the correct absolute path of `claude-hook-notify.js`
+- `node claude-hook-notify.js completed` — test the hook directly
+- `npm run hooks:install` — re-install hooks
+
+On a remote VPS, hooks must be installed for the user running the process (e.g. `root`). The hook path must match the actual project location on that machine.
+
+## App Mode (`APP_MODE`)
+
+Controls which features each instance handles. Allows running local + cloud instances on the same Slack app without duplicate responses.
+
+- `local` — @mention chat in `SLACK_CHANNEL_ID` only. Ignores mentions in monitor channels. No alert/delay monitoring, no daily summary.
+- `cloud` — Alert monitoring, delay monitoring, daily summary, and @mention chat in monitor channel threads only. Ignores mentions in non-monitor channels.
+- `all` (default) — Everything enabled. Backward compatible.
+
+The filtering happens in `_setupListeners()` in `src/channels/slack/socket.js`. Both instances connect via Socket Mode and receive all events, but each ignores events outside its responsibility.
+
 ## Configuration
 
 Environment variables in `.env` (see `.env.example`):
 - **Slack**: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_CHANNEL_ID`, `SLACK_REPO_PATH`, `SLACK_REPO_ROOT`, `SLACK_CLAUDE_COMMAND`, `SLACK_WHITELIST`, `SLACK_HTTP_PORT`
+- **App Mode**: `APP_MODE` (`local`, `cloud`, `all`)
 - **Alert Monitoring**: `MONITOR_CHANNELS`, `ALERT_SKILL`, `PAGERDUTY_API_TOKEN`, `PAGERDUTY_FROM_EMAIL`
 - **Daily Summary**: `DAILY_SUMMARY_CHANNELS`, `DAILY_SUMMARY_TIME`, `DAILY_SUMMARY_MODEL`, `SLACK_XOXC_TOKEN`, `SLACK_XOXD_TOKEN`
 - **Session**: `SESSION_INACTIVITY_TIMEOUT_MS`, `POLLER_TIMEOUT_MS`
