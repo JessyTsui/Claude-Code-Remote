@@ -38,6 +38,7 @@ const config = {
     pollerTimeoutMs: parseInt(process.env.POLLER_TIMEOUT_MS) || 1800000, // 30 min
     pagerdutyApiToken: process.env.PAGERDUTY_API_TOKEN || '',
     pagerdutyFromEmail: process.env.PAGERDUTY_FROM_EMAIL || '',
+    pagerdutyWebhookSecret: process.env.PAGERDUTY_WEBHOOK_SECRET || '',
     // Delay alert monitoring
     monitorDelayChannels: process.env.MONITOR_DELAY_CHANNELS || '',
     delayAlertThreshold: process.env.DELAY_ALERT_THRESHOLD || '3',

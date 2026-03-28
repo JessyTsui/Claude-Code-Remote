@@ -866,6 +866,11 @@ ${formatted}`
 
         this.app.event('app_mention', async ({ event, say }) => {
             try {
+                // Dedup: both app_mention and message events fire for the same @mention
+                if (!this._handledMentionTs) this._handledMentionTs = new Set();
+                if (this._handledMentionTs.has(event.ts)) return;
+                this._handledMentionTs.add(event.ts);
+
                 // cloud mode: only handle mentions in monitored channels (alert threads)
                 // local mode: only handle mentions in non-monitored channels (main chat)
                 // This prevents duplicate responses when both instances receive the same event
@@ -893,8 +898,32 @@ ${formatted}`
 
         // Monitor channels + delay alerts: enabled in 'cloud' and 'all' modes
         if (mode !== 'local') {
-            this.app.event('message', async ({ event }) => {
+            this.app.event('message', async ({ event, say }) => {
                 try {
+                    // Handle @mentions that arrive as 'message' instead of 'app_mention'
+                    // (happens when multiple Socket Mode connections exist, or with Assistants API)
+                    if (!event.subtype && event.text && event.text.includes(`<@`) && !event.bot_id) {
+                        // Resolve bot user ID lazily
+                        if (!this._botUserId) {
+                            try {
+                                this._botUserId = (await this.app.client.auth.test()).user_id;
+                            } catch { /* ignore */ }
+                        }
+                        if (this._botUserId && event.text.includes(`<@${this._botUserId}>`)) {
+                            // Dedup: skip if app_mention already handled this event
+                            if (!this._handledMentionTs) this._handledMentionTs = new Set();
+                            if (this._handledMentionTs.has(event.ts)) return;
+                            this._handledMentionTs.add(event.ts);
+                            // Prevent unbounded growth
+                            if (this._handledMentionTs.size > 200) {
+                                const arr = [...this._handledMentionTs];
+                                this._handledMentionTs = new Set(arr.slice(-100));
+                            }
+                            this.logger.info(`Message-as-mention fallback for ts=${event.ts}`);
+                            await this._handleMention(event, say);
+                            return;
+                        }
+                    }
                     await this._handleMonitoredMessage(event);
                     await this._handleDelayAlertMessage(event);
                 } catch (err) {
@@ -1977,6 +2006,10 @@ ${formatted}`
 
     _setupHttpServer() {
         const httpApp = express();
+        // Capture raw body for PagerDuty HMAC verification (must be before generic json parser)
+        httpApp.use('/pagerduty', express.json({
+            verify: (req, _res, buf) => { req.rawBody = buf; }
+        }));
         httpApp.use(express.json());
 
         const swaggerDoc = {
@@ -2267,7 +2300,143 @@ ${formatted}`
             }).catch(err => this.logger.error(`Daily summary error: ${err.message}`));
         });
 
+        // ─── PagerDuty Webhook (fallback for Socket Mode) ──────────
+        httpApp.post('/pagerduty/webhook', async (req, res) => {
+            // Verify HMAC signature
+            if (!this._verifyPagerDutySignature(req)) {
+                this.logger.warn('PD webhook rejected: invalid signature');
+                return res.status(401).json({ error: 'Invalid signature' });
+            }
+
+            const event = req.body?.event;
+
+            // Only handle incident.triggered
+            if (!event || event.event_type !== 'incident.triggered') {
+                return res.status(200).json({ status: 'ignored', reason: event?.event_type || 'unknown' });
+            }
+
+            const incidentId = event.data?.id;
+            if (!incidentId) {
+                return res.status(200).json({ status: 'ignored', reason: 'no incident ID' });
+            }
+
+            // Dedup — skip if Socket Mode already handled it
+            if (this.trackedIncidents.has(incidentId)) {
+                this.logger.info(`PD webhook: incident ${incidentId} already tracked — skipping`);
+                return res.status(200).json({ status: 'skipped', incidentId });
+            }
+
+            this.logger.info(`PD webhook: new incident ${incidentId}`);
+
+            // Respond immediately — process async
+            res.status(200).json({ status: 'accepted', incidentId });
+
+            // Async: find Slack message and trigger investigation
+            try {
+                this.trackedIncidents.add(incidentId);
+
+                const found = await this._findPagerDutySlackMessage(incidentId);
+                if (!found) {
+                    this.logger.error(`PD webhook: Slack message not found for ${incidentId} after retries`);
+                    this.trackedIncidents.delete(incidentId);
+                    return;
+                }
+
+                const { channelId, message } = found;
+                const messageTs = message.ts;
+
+                // Race check — Socket Mode may have handled it while we searched
+                const sessionKey = `${channelId}-${messageTs}`;
+                if (this._getSession(sessionKey)) {
+                    this.logger.info(`PD webhook: session already exists for ${sessionKey}`);
+                    return;
+                }
+
+                // Acknowledge PD
+                if (this.config.pagerdutyApiToken) {
+                    const pdResult = await this._acknowledgePagerDuty(incidentId);
+                    if (pdResult?.skipped) {
+                        this.logger.info(`PD webhook: incident ${incidentId} already ${pdResult.status}`);
+                        this.trackedIncidents.delete(incidentId);
+                        return;
+                    }
+                }
+
+                // React with eyes
+                await this._addReaction(channelId, messageTs, 'eyes');
+
+                // Download attached images
+                const imagePaths = await this._downloadSlackImages(message.files, `alert-${messageTs.replace('.', '')}`);
+                const imageInstruction = imagePaths.length > 0
+                    ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
+                    : '';
+
+                // Build prompt
+                const permalink = await this._getPermalink(channelId, messageTs);
+                const text = message.text || '';
+                const alertSkill = this.config.alertSkill;
+                let prompt;
+                if (alertSkill && permalink) {
+                    prompt = `execute ${alertSkill} skill with argument ${permalink}${imageInstruction}`;
+                } else if (alertSkill) {
+                    prompt = `execute ${alertSkill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
+                } else {
+                    prompt = `Investigate this PagerDuty alert: ${(permalink || text).substring(0, 500)}${imageInstruction}`;
+                }
+
+                await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
+                this.logger.info(`PD webhook: investigation started for ${incidentId}`);
+            } catch (err) {
+                this.logger.error(`PD webhook error for ${incidentId}: ${err.message}`);
+                this.trackedIncidents.delete(incidentId);
+            }
+        });
+
         this._httpApp = httpApp;
+    }
+
+    _verifyPagerDutySignature(req) {
+        const secret = this.config.pagerdutyWebhookSecret;
+        if (!secret) return true; // No secret configured — allow all
+        const signature = req.headers['x-pagerduty-signature'];
+        if (!signature) return false;
+        const crypto = require('crypto');
+        const expected = 'v1=' + crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
+        try {
+            return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+        } catch {
+            return false;
+        }
+    }
+
+    async _findPagerDutySlackMessage(incidentId) {
+        const channelIds = [...this.alertMonitor.monitoredChannelIds];
+        if (channelIds.length === 0) return null;
+
+        const delays = [2000, 5000, 10000];
+        for (let attempt = 0; attempt < delays.length + 1; attempt++) {
+            if (attempt > 0) await new Promise(r => setTimeout(r, delays[attempt - 1]));
+
+            for (const channelId of channelIds) {
+                try {
+                    const result = await this.app.client.conversations.history({
+                        channel: channelId,
+                        limit: 20,
+                        oldest: String((Date.now() / 1000 - 120).toFixed(6)),
+                    });
+                    for (const msg of (result.messages || [])) {
+                        if (msg.thread_ts && msg.thread_ts !== msg.ts) continue;
+                        if (this.alertMonitor.extractIncidentId(msg) === incidentId) {
+                            this.logger.info(`PD webhook: found Slack message for ${incidentId} in ${channelId} (attempt ${attempt + 1})`);
+                            return { channelId, message: msg };
+                        }
+                    }
+                } catch (err) {
+                    this.logger.error(`PD webhook: search error in ${channelId}: ${err.message}`);
+                }
+            }
+        }
+        return null;
     }
 
     _parseSlackUrl(url) {
