@@ -56,3 +56,4 @@ src/data/
 /.claude/settings.local.json
 /.serena
 /docs/plans
+/slack-sessions.db

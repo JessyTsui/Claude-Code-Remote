@@ -16,7 +16,16 @@ const logger = new Logger('DailySummary');
  * Fetch channel messages from last 24h using personal Slack credentials.
  */
 async function fetchChannelMessages(channelId, xoxcToken, xoxdToken) {
-    const oldest = Math.floor(Date.now() / 1000) - 86400;
+    // Yesterday midnight-to-midnight in GMT+7 (Bangkok)
+    const GMT7_OFFSET_MS = 7 * 3600000;
+    const now = new Date();
+    const nowGmt7 = new Date(now.getTime() + GMT7_OFFSET_MS);
+    const todayMidnightGmt7 = Date.UTC(nowGmt7.getUTCFullYear(), nowGmt7.getUTCMonth(), nowGmt7.getUTCDate());
+    const yesterdayMidnightGmt7 = todayMidnightGmt7 - 86400000;
+    // Convert GMT+7 boundaries back to UTC epoch seconds
+    const oldest = Math.floor((yesterdayMidnightGmt7 - GMT7_OFFSET_MS) / 1000);
+    const latest = Math.floor((todayMidnightGmt7 - GMT7_OFFSET_MS) / 1000);
+
     const messages = [];
     let cursor;
     const cookieHeader = `d=${xoxdToken}`;
@@ -25,6 +34,7 @@ async function fetchChannelMessages(channelId, xoxcToken, xoxdToken) {
         const params = {
             channel: channelId,
             oldest: String(oldest),
+            latest: String(latest),
             limit: 200,
             inclusive: true,
         };
@@ -131,7 +141,7 @@ async function summarizeWithClaude(channelName, formattedMessages, model) {
 
     const prompt = `You are a daily summary assistant. Today is ${dateStr}.
 
-Below are the messages from the Slack channel #${channelName} over the last 24 hours (timestamps in GMT+7/Bangkok time):
+Below are the messages from the Slack channel #${channelName} from yesterday (timestamps in GMT+7/Bangkok time):
 
 ---
 ${formattedMessages}
@@ -260,7 +270,7 @@ async function runDailySummary(options) {
 
             if (messages.length === 0) {
                 logger.info(`#${channel.name}: no messages`);
-                await sendDm(target, `*#${channel.name}*\n_No activity in the last 24 hours._`);
+                await sendDm(target, `*#${channel.name}*\n_No activity yesterday._`);
                 continue;
             }
 
