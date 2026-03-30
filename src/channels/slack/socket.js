@@ -1150,7 +1150,7 @@ ${formatted}`
                 // Tmux alive — Claude already has full context, just inject the raw command
                 this._touchSession(sessionKey);
                 if (userId) this._updateLastUserId(sessionKey, userId);
-                this._startSessionTimeout(sessionKey);
+                this._clearSessionTimeout(sessionKey); // User sent a message — bot is now processing, don't timeout while user waits
                 // No thread context needed — Claude is already in the conversation
                 this.logger.info(`Existing live session ${session.sessionName}, injecting command directly`);
             } else if (session && !this._isTmuxSessionAlive(session.sessionName)) {
@@ -1170,6 +1170,10 @@ ${formatted}`
                     return;
                 }
                 this._touchSession(sessionKey);
+                // Reset claude_session_id so the new session's SessionStart hook can register.
+                // Without this, COALESCE preserves the dead session's ID and the Stop hook
+                // rejects the new session as a "subagent".
+                this._stmts.updateClaudeSessionId.run(null, Date.now(), sessionKey);
                 if (userId) this._updateLastUserId(sessionKey, userId);
 
                 // Fetch thread context — summarize with Gemini if long
@@ -1284,7 +1288,7 @@ ${formatted}`
                 }
 
                 this.logger.info(`New session created: ${sessionName} for channel ${channelId}`);
-                this._startSessionTimeout(sessionKey);
+                // Don't start timeout yet — bot is processing the first command. Timeout starts when bot responds.
             }
 
             // Handle /exit — clean up session
@@ -1783,6 +1787,97 @@ ${formatted}`
                 this.logger.info(`Session sweep: ${orphaned} orphaned timers started, ${dead} dead sessions cleaned`);
             }
         }, SWEEP_INTERVAL);
+    }
+
+    /**
+     * After startup, scan recent messages in all relevant channels for @mentions
+     * that the bot never replied to. Replays them as if they just arrived.
+     * Covers events dropped during restart / Socket Mode reconnection.
+     */
+    async _replayMissedMentions() {
+        const LOOKBACK_S = 300; // 5 minutes
+        const oldest = String((Date.now() / 1000) - LOOKBACK_S);
+
+        // Resolve bot user ID
+        if (!this._botUserId) {
+            try {
+                this._botUserId = (await this.app.client.auth.test()).user_id;
+            } catch { return; }
+        }
+        const botId = this._botUserId;
+
+        // Collect channels to scan: main channel + monitor channels
+        const channels = new Set();
+        if (this.config.channelId) channels.add(this.config.channelId);
+        for (const ch of this.alertMonitor.monitoredChannelIds || []) channels.add(ch);
+
+        let replayed = 0;
+
+        for (const channelId of channels) {
+            try {
+                // Fetch recent channel messages
+                const result = await this.app.client.conversations.history({
+                    channel: channelId,
+                    oldest,
+                    limit: 50
+                });
+
+                // Collect thread_ts values that have bot mentions
+                const threadsToCheck = new Set();
+                for (const msg of result.messages || []) {
+                    // Top-level @mention
+                    if (msg.text?.includes(`<@${botId}>`) && !msg.bot_id && msg.user) {
+                        threadsToCheck.add(msg.ts);
+                    }
+                    // Thread reply that bubbled up — check the thread
+                    if (msg.reply_count > 0 && msg.latest_reply) {
+                        threadsToCheck.add(msg.ts);
+                    }
+                }
+
+                for (const threadTs of threadsToCheck) {
+                    try {
+                        const replies = await this.app.client.conversations.replies({
+                            channel: channelId,
+                            ts: threadTs,
+                            oldest,
+                            limit: 50
+                        });
+
+                        const messages = replies.messages || [];
+                        // Find the last @mention of the bot from a human user
+                        let lastMention = null;
+                        for (const msg of messages) {
+                            if (msg.text?.includes(`<@${botId}>`) && !msg.bot_id && msg.user) {
+                                lastMention = msg;
+                            }
+                        }
+                        if (!lastMention) continue;
+
+                        // Check if bot replied after this mention
+                        const botRepliedAfter = messages.some(msg =>
+                            (msg.bot_id || msg.user === botId) &&
+                            parseFloat(msg.ts) > parseFloat(lastMention.ts)
+                        );
+                        if (botRepliedAfter) continue;
+
+                        // Missed mention — replay it
+                        this.logger.info(`Replaying missed mention: user=${lastMention.user} channel=${channelId} thread=${threadTs} ts=${lastMention.ts}`);
+                        const say = async (msgObj) => {
+                            await this.app.client.chat.postMessage({ channel: channelId, thread_ts: threadTs, ...msgObj });
+                        };
+                        await this._handleMention(lastMention, say);
+                        replayed++;
+                    } catch (err) {
+                        this.logger.warn(`Failed to check thread ${threadTs} in ${channelId}: ${err.message}`);
+                    }
+                }
+            } catch (err) {
+                this.logger.warn(`Failed to scan channel ${channelId} for missed mentions: ${err.message}`);
+            }
+        }
+
+        this.logger.info(`[startup] replayMissedMentions: ${replayed} replayed`);
     }
 
     _extractResponse(baselineOutput, currentOutput) {
@@ -2536,6 +2631,11 @@ ${formatted}`
             this.logger.info(`[startup] HTTP API on port ${this.httpPort}`);
             this.logger.info(`[startup] total: ${Date.now() - t0}ms`);
         });
+
+        // Check for missed mentions after connection stabilizes
+        setTimeout(() => this._replayMissedMentions().catch(err =>
+            this.logger.error(`Failed to replay missed mentions: ${err.message}`)
+        ), 3000);
     }
 
     async stop() {
