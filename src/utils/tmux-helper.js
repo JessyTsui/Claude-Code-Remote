@@ -12,7 +12,10 @@ function buildTmuxCommand(sessionName, repoPath, claudeCmd, sessionKey) {
     // Escape single quotes for nested shell invocation
     const escapedCmd = claudeCmd.replace(/'/g, "'\\''");
     const envExport = sessionKey ? `export SLACK_SESSION_KEY='${sessionKey}' && ` : '';
-    return `tmux new-session -d -s ${sessionName} -c "${repoPath}" "${shell} -l -c '${envExport}${escapedCmd}'"`;
+    // Use -li (login + interactive) so .zshrc is sourced and the full user
+    // environment (PATH, custom env vars) is available. Without -i, non-interactive
+    // login shells skip .zshrc and tools like claude (in ~/.local/bin) aren't found.
+    return `tmux new-session -d -s ${sessionName} -c "${repoPath}" "${shell} -li -c '${envExport}${escapedCmd}'"`;
 }
 
 module.exports = { buildTmuxCommand };

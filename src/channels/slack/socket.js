@@ -1357,6 +1357,20 @@ ${formatted}`
         return `slack-${channelId.slice(-4)}-${suffix}`;
     }
 
+    _ensureTmuxServer() {
+        try {
+            execSync('tmux list-sessions 2>/dev/null', { stdio: 'ignore' });
+        } catch {
+            // No server running — start one with a detached keepalive session
+            try {
+                execSync('tmux new-session -d -s _keepalive', { stdio: 'ignore' });
+                this.logger.info('Started tmux server (no existing server found)');
+            } catch (e) {
+                this.logger.warn(`Failed to start tmux server: ${e.message}`);
+            }
+        }
+    }
+
     async _createTmuxSession(sessionName, repoPath, claudeCmd, sessionKey = null) {
         try {
             execSync('which tmux', { stdio: 'ignore' });
@@ -2608,6 +2622,10 @@ ${formatted}`
             this.delayAlertMonitor.db = this.db;
             this.delayAlertMonitor._initCountersTable();
         }
+
+        // Ensure tmux server is running — without a server, session creation fails.
+        // This can happen after a service restart when no tmux sessions exist.
+        this._ensureTmuxServer();
 
         // Reconcile DB sessions with live tmux sessions
         await this._reconcileSessions();

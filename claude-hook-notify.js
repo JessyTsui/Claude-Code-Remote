@@ -351,8 +351,10 @@ async function sendHookNotification() {
                 }
 
                 if (alreadyPosted) {
-                    console.log(`Alert response already posted to ${channelId} thread=${threadTs}, skipping`);
-                    // Reaction swap (👀→✅) is handled by socket handler on session cleanup
+                    // Alert investigation already posted — treat follow-up as regular response
+                    console.log(`Alert response already posted — posting follow-up as regular response`);
+                    await sendResponse(web, channelId, threadTs, assistantMessage, stats, lastUserId);
+                    console.log(`Follow-up response posted (${assistantMessage.length} chars) to ${channelId} thread=${threadTs}`);
                     return;
                 }
 
