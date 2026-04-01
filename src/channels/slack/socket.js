@@ -1452,25 +1452,30 @@ ${formatted}`
             const perLineDelay = Math.min(command.split('\n').length * 100, 3000);
             await new Promise(r => setTimeout(r, baseDelay + perLineDelay));
 
-            // Send Enter and verify it was accepted — retry if Claude still shows pasted text
-            for (let attempt = 0; attempt < 3; attempt++) {
+            // Send Enter and verify Claude started processing.
+            // Check for working indicators in the output to confirm submission.
+            // Previous approach checked for '[Pasted text' which Claude Code never shows,
+            // causing the retry to always short-circuit on attempt 1.
+            const workingIndicators = ['Brewing', 'Thinking', 'Working', 'Clauding',
+                'Flibbertigibbeting', 'esc to interrupt', '● Skill('];
+            const maxAttempts = 5;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 execSync(`tmux send-keys -t ${sessionName} Enter`);
-                await new Promise(r => setTimeout(r, 1500));
+                // Longer wait on later attempts — give Claude Code more time to process
+                const waitMs = 1500 + attempt * 1000;
+                await new Promise(r => setTimeout(r, waitMs));
 
                 const output = this._captureOutput(sessionName);
-                // If Claude is working (no idle prompt with pasted text), Enter was accepted
-                const hasPastedIndicator = output.includes('[Pasted text');
-                const isWorking = output.includes('Clauding') || output.includes('Working') ||
-                    output.includes('Thinking') || output.includes('Flibbertigibbeting');
-                if (isWorking || !hasPastedIndicator) {
+                const isWorking = workingIndicators.some(ind => output.includes(ind));
+                if (isWorking) {
                     if (attempt > 0) {
-                        this.logger.info(`Enter accepted on retry ${attempt + 1} for ${sessionName}`);
+                        this.logger.info(`Enter accepted on attempt ${attempt + 1} for ${sessionName}`);
                     }
                     return;
                 }
-                this.logger.warn(`Enter not accepted (attempt ${attempt + 1}), retrying for ${sessionName}`);
+                this.logger.warn(`Enter not confirmed (attempt ${attempt + 1}/${maxAttempts}), retrying for ${sessionName}`);
             }
-            this.logger.warn(`Enter may not have been accepted after 3 attempts for ${sessionName}`);
+            this.logger.error(`Enter may not have been accepted after ${maxAttempts} attempts for ${sessionName}`);
         } finally {
             // Clean up temp file
             try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
