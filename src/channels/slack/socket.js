@@ -56,7 +56,7 @@ class SlackSocketHandler {
 
         // Alert monitoring
         this.alertMonitor = new AlertMonitor(this.app, config);
-        this.trackedIncidents = new Set();
+        this.trackedIncidents = new Map(); // incidentId → { channelId, messageTs }
 
         // Delay alert monitoring
         this.delayAlertMonitor = new DelayAlertMonitor(this.app, this.db, config);
@@ -861,6 +861,38 @@ ${formatted}`
         }
     }
 
+    async _notifyOwnerIncidentAcked(incidentId, incidentData) {
+        const ownerId = this.config.ownerUserId;
+        if (!ownerId) return;
+
+        const tracked = this.trackedIncidents.get(incidentId);
+        let permalink = null;
+        if (tracked?.channelId && tracked?.messageTs) {
+            permalink = await this._getPermalink(tracked.channelId, tracked.messageTs);
+        }
+
+        const title = incidentData?.title || incidentData?.summary || incidentId;
+        const urgency = incidentData?.urgency ? ` (${incidentData.urgency})` : '';
+        const lines = [
+            `:bell: *PagerDuty Webhook Received*`,
+            `*Incident:* ${title}${urgency}`,
+            `*Status:* Already acknowledged via Slack — investigation in progress`,
+        ];
+        if (permalink) {
+            lines.push(`*Slack thread:* ${permalink}`);
+        }
+
+        try {
+            await this.app.client.chat.postMessage({
+                channel: ownerId,
+                text: lines.join('\n'),
+            });
+            this.logger.info(`Owner notified: incident ${incidentId} webhook received (already acked)`);
+        } catch (err) {
+            this.logger.error(`Failed to notify owner of incident ${incidentId}: ${err.message}`);
+        }
+    }
+
     _setupListeners() {
         const mode = this.config.appMode || 'all';
 
@@ -977,7 +1009,7 @@ ${formatted}`
             return;
         }
 
-        if (incidentId) this.trackedIncidents.add(incidentId);
+        if (incidentId) this.trackedIncidents.set(incidentId, { channelId, messageTs });
 
         // PD acknowledge
         if (incidentId && this.config.pagerdutyApiToken) {
@@ -2481,10 +2513,15 @@ ${formatted}`
                 return res.status(200).json({ status: 'ignored', reason: 'no incident ID' });
             }
 
-            // Dedup — skip if Socket Mode already handled it
+            // Dedup — skip if Socket Mode already handled it, but notify owner
             if (this.trackedIncidents.has(incidentId)) {
                 this.logger.info(`PD webhook: incident ${incidentId} already tracked — skipping`);
-                return res.status(200).json({ status: 'skipped', incidentId });
+                res.status(200).json({ status: 'skipped', incidentId });
+                // Notify owner with link to the Slack message we already acked
+                this._notifyOwnerIncidentAcked(incidentId, event.data).catch(err =>
+                    this.logger.error(`Failed to notify owner of acked incident: ${err.message}`)
+                );
+                return;
             }
 
             this.logger.info(`PD webhook: new incident ${incidentId}`);
@@ -2494,7 +2531,7 @@ ${formatted}`
 
             // Async: find Slack message and trigger investigation
             try {
-                this.trackedIncidents.add(incidentId);
+                this.trackedIncidents.set(incidentId, {}); // placeholder until we find the Slack message
 
                 const found = await this._findPagerDutySlackMessage(incidentId);
                 if (!found) {
@@ -2505,11 +2542,15 @@ ${formatted}`
 
                 const { channelId, message } = found;
                 const messageTs = message.ts;
+                this.trackedIncidents.set(incidentId, { channelId, messageTs });
 
                 // Race check — Socket Mode may have handled it while we searched
                 const sessionKey = `${channelId}-${messageTs}`;
                 if (this._getSession(sessionKey)) {
                     this.logger.info(`PD webhook: session already exists for ${sessionKey}`);
+                    this._notifyOwnerIncidentAcked(incidentId, event.data).catch(err =>
+                        this.logger.error(`Failed to notify owner of acked incident: ${err.message}`)
+                    );
                     return;
                 }
 
@@ -2518,6 +2559,9 @@ ${formatted}`
                     const pdResult = await this._acknowledgePagerDuty(incidentId);
                     if (pdResult?.skipped) {
                         this.logger.info(`PD webhook: incident ${incidentId} already ${pdResult.status}`);
+                        this._notifyOwnerIncidentAcked(incidentId, event.data).catch(err =>
+                            this.logger.error(`Failed to notify owner of acked incident: ${err.message}`)
+                        );
                         this.trackedIncidents.delete(incidentId);
                         return;
                     }
