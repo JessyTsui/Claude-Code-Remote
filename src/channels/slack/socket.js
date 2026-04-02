@@ -861,22 +861,27 @@ ${formatted}`
         }
     }
 
-    async _notifyOwnerIncidentAcked(incidentId, incidentData) {
+    async _notifyOwnerIncidentWebhook(incidentId, incidentData, { alreadyAcked = false, permalink = null } = {}) {
         const ownerId = this.config.ownerUserId;
         if (!ownerId) return;
 
-        const tracked = this.trackedIncidents.get(incidentId);
-        let permalink = null;
-        if (tracked?.channelId && tracked?.messageTs) {
-            permalink = await this._getPermalink(tracked.channelId, tracked.messageTs);
+        // If no permalink provided, try to look it up from tracked data
+        if (!permalink) {
+            const tracked = this.trackedIncidents.get(incidentId);
+            if (tracked?.channelId && tracked?.messageTs) {
+                permalink = await this._getPermalink(tracked.channelId, tracked.messageTs);
+            }
         }
 
         const title = incidentData?.title || incidentData?.summary || incidentId;
         const urgency = incidentData?.urgency ? ` (${incidentData.urgency})` : '';
+        const status = alreadyAcked
+            ? 'Already acknowledged via Slack — investigation in progress'
+            : 'New incident — starting investigation via webhook';
         const lines = [
             `:bell: *PagerDuty Webhook Received*`,
             `*Incident:* ${title}${urgency}`,
-            `*Status:* Already acknowledged via Slack — investigation in progress`,
+            `*Status:* ${status}`,
         ];
         if (permalink) {
             lines.push(`*Slack thread:* ${permalink}`);
@@ -887,7 +892,7 @@ ${formatted}`
                 channel: ownerId,
                 text: lines.join('\n'),
             });
-            this.logger.info(`Owner notified: incident ${incidentId} webhook received (already acked)`);
+            this.logger.info(`Owner notified: incident ${incidentId} webhook (alreadyAcked=${alreadyAcked})`);
         } catch (err) {
             this.logger.error(`Failed to notify owner of incident ${incidentId}: ${err.message}`);
         }
@@ -2518,8 +2523,8 @@ ${formatted}`
                 this.logger.info(`PD webhook: incident ${incidentId} already tracked — skipping`);
                 res.status(200).json({ status: 'skipped', incidentId });
                 // Notify owner with link to the Slack message we already acked
-                this._notifyOwnerIncidentAcked(incidentId, event.data).catch(err =>
-                    this.logger.error(`Failed to notify owner of acked incident: ${err.message}`)
+                this._notifyOwnerIncidentWebhook(incidentId, event.data, { alreadyAcked: true }).catch(err =>
+                    this.logger.error(`Failed to notify owner of incident webhook: ${err.message}`)
                 );
                 return;
             }
@@ -2591,6 +2596,11 @@ ${formatted}`
 
                 await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
                 this.logger.info(`PD webhook: investigation started for ${incidentId}`);
+
+                // Notify owner that webhook triggered a new investigation
+                this._notifyOwnerIncidentWebhook(incidentId, event.data, { permalink }).catch(err =>
+                    this.logger.error(`Failed to notify owner of incident webhook: ${err.message}`)
+                );
             } catch (err) {
                 this.logger.error(`PD webhook error for ${incidentId}: ${err.message}`);
                 this.trackedIncidents.delete(incidentId);
