@@ -159,7 +159,10 @@ async function sendResponse(web, channelId, threadTs, response, stats, mentionUs
         ? `_${stats.model} · Ctx: ${stats.context} · In: ${stats.tokensIn} Out: ${stats.tokensOut}_`
         : '';
 
-    if (response.length <= maxLen) {
+    // First chunk must leave room for the prefix
+    const firstChunkMax = maxLen - prefix.length;
+
+    if (response.length <= firstChunkMax) {
         const blocks = [
             { type: 'section', text: { type: 'mrkdwn', text: prefix + response } }
         ];
@@ -174,7 +177,9 @@ async function sendResponse(web, channelId, threadTs, response, stats, mentionUs
         });
     } else {
         const chunks = [];
-        for (let i = 0; i < response.length; i += maxLen) {
+        // First chunk is smaller to accommodate prefix
+        chunks.push(response.substring(0, firstChunkMax));
+        for (let i = firstChunkMax; i < response.length; i += maxLen) {
             chunks.push(response.substring(i, i + maxLen));
         }
         for (let i = 0; i < chunks.length; i++) {
@@ -366,8 +371,11 @@ async function sendHookNotification() {
                     || assistantMessage.substring(0, 500).trim()
                 );
 
+                const maxSummaryLen = 2970; // 3000 limit minus "*Recommended Action:* " prefix
+                const trimmedSummary = summary.length > maxSummaryLen
+                    ? summary.substring(0, maxSummaryLen) + '…' : summary;
                 const alertBlocks = [
-                    { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${summary}` } }
+                    { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${trimmedSummary}` } }
                 ];
                 if (stats) {
                     const statsLine = `_${stats.model} · Ctx: ${stats.context} · In: ${stats.tokensIn} Out: ${stats.tokensOut}_`;

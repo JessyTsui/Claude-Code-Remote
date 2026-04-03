@@ -1331,7 +1331,11 @@ ${formatted}`
             // Handle /exit — clean up session
             if (command === '/exit') {
                 if (this._isTmuxSessionAlive(session.sessionName)) {
-                    await this._injectCommand(session.sessionName, command);
+                    try {
+                        await this._injectCommand(session.sessionName, command);
+                    } catch {
+                        // Expected — /exit kills the session before Enter-retry finishes
+                    }
                 }
                 this._deleteSession(sessionKey);
                 this._clearSessionTimeout(sessionKey);
@@ -2052,14 +2056,16 @@ ${formatted}`
     }
 
     async _sendResponse(say, threadTs, response, stats) {
-        const maxLen = 2990; // Slack section block text limit is 3000 chars, minus ``` wrapping
+        const codeWrap = '```\n';
+        const codeWrapEnd = '\n```';
+        const maxLen = 3000 - codeWrap.length - codeWrapEnd.length; // Slack section block text limit is 3000
         const statsLine = stats
             ? `\n_${stats.model || ''} · Ctx: ${stats.context || '?'} · In: ${stats.tokensIn || '?'} Out: ${stats.tokensOut || '?'}_`
             : '';
 
         if (response.length <= maxLen) {
             const blocks = [
-                { type: 'section', text: { type: 'mrkdwn', text: '```\n' + response + '\n```' } }
+                { type: 'section', text: { type: 'mrkdwn', text: codeWrap + response + codeWrapEnd } }
             ];
             if (statsLine) {
                 blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: statsLine.trim() }] });
@@ -2072,7 +2078,7 @@ ${formatted}`
             }
             for (let i = 0; i < chunks.length; i++) {
                 const blocks = [
-                    { type: 'section', text: { type: 'mrkdwn', text: '```\n' + chunks[i] + '\n```' } }
+                    { type: 'section', text: { type: 'mrkdwn', text: codeWrap + chunks[i] + codeWrapEnd } }
                 ];
                 // Add stats to the last chunk only
                 if (i === chunks.length - 1 && statsLine) {
@@ -2110,9 +2116,12 @@ ${formatted}`
             ? `\n_${stats.model || ''} · Ctx: ${stats.context || '?'} · In: ${stats.tokensIn || '?'} Out: ${stats.tokensOut || '?'}_`
             : '';
 
-        // Post the summary (Recommended Action only)
+        // Post the summary (Recommended Action only), truncate to stay under 3000-char block limit
+        const maxSummaryLen = 2970; // 3000 limit minus "*Recommended Action:* " prefix
+        const trimmedSummary = summary.length > maxSummaryLen
+            ? summary.substring(0, maxSummaryLen) + '…' : summary;
         const blocks = [
-            { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${summary}` } }
+            { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${trimmedSummary}` } }
         ];
         if (statsLine) {
             blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: statsLine.trim() }] });
