@@ -160,28 +160,103 @@ class TelegramWebhookHandler {
     async _handleCallbackQuery(callbackQuery) {
         const chatId = callbackQuery.message.chat.id;
         const data = callbackQuery.data;
-        
+
         // Answer callback query to remove loading state
         await this._answerCallbackQuery(callbackQuery.id);
-        
-        if (data.startsWith('personal:')) {
+
+        if (data.startsWith('approve:')) {
+            // Handle approval button clicks: approve:TOKEN:action
+            await this._handleApprovalCallback(chatId, data);
+        } else if (data.startsWith('personal:')) {
             const token = data.split(':')[1];
-            // Send personal chat command format
             await this._sendMessage(chatId,
                 `📝 *Personal Chat Command Format:*\n\n\`/cmd ${token} <your command>\`\n\n*Example:*\n\`/cmd ${token} please analyze this code\`\n\n💡 *Copy and paste the format above, then add your command!*`,
                 { parse_mode: 'Markdown' });
         } else if (data.startsWith('group:')) {
             const token = data.split(':')[1];
-            // Send group chat command format with @bot_name
             const botUsername = await this._getBotUsername();
             await this._sendMessage(chatId,
                 `👥 *Group Chat Command Format:*\n\n\`@${botUsername} /cmd ${token} <your command>\`\n\n*Example:*\n\`@${botUsername} /cmd ${token} please analyze this code\`\n\n💡 *Copy and paste the format above, then add your command!*`,
                 { parse_mode: 'Markdown' });
         } else if (data.startsWith('session:')) {
             const token = data.split(':')[1];
-            // For backward compatibility - send help message for old callback buttons
             await this._sendMessage(chatId,
                 `📝 *How to send a command:*\n\nType:\n\`/cmd ${token} <your command>\`\n\nExample:\n\`/cmd ${token} please analyze this code\`\n\n💡 *Tip:* New notifications have a button that auto-fills the command for you!`,
+                { parse_mode: 'Markdown' });
+        }
+    }
+
+    /**
+     * Handle approval button callbacks
+     * @param {number} chatId - Telegram chat ID
+     * @param {string} data - Callback data in format approve:TOKEN:action
+     */
+    async _handleApprovalCallback(chatId, data) {
+        const parts = data.split(':');
+        if (parts.length !== 3) {
+            await this._sendMessage(chatId, '❌ Invalid approval callback format.');
+            return;
+        }
+
+        const token = parts[1];
+        const action = parts[2];
+
+        // Find session by token
+        const session = await this._findSessionByToken(token);
+        if (!session) {
+            await this._sendMessage(chatId,
+                '❌ Session expired or invalid. Please wait for a new notification.',
+                { parse_mode: 'Markdown' });
+            return;
+        }
+
+        // Check if session is expired
+        if (session.expiresAt < Math.floor(Date.now() / 1000)) {
+            await this._sendMessage(chatId,
+                '❌ Token has expired. Please wait for a new task notification.',
+                { parse_mode: 'Markdown' });
+            await this._removeSession(session.id);
+            return;
+        }
+
+        // Map button actions to Claude responses
+        const actionMap = {
+            'yes': 'yes',
+            'no': 'no',
+            'skip': 'skip',
+            'always_allow': 'yes, always allow this',
+            'always_deny': 'no, always deny this'
+        };
+
+        const command = actionMap[action];
+        if (!command) {
+            await this._sendMessage(chatId, '❌ Unknown action.');
+            return;
+        }
+
+        const actionEmoji = {
+            'yes': '✅',
+            'no': '❌',
+            'skip': '⏭️',
+            'always_allow': '✅🔓',
+            'always_deny': '🚫'
+        };
+
+        try {
+            // Inject the approval response into tmux session
+            const tmuxSession = session.tmuxSession || 'default';
+            await this.injector.injectCommand(command, tmuxSession);
+
+            await this._sendMessage(chatId,
+                `${actionEmoji[action]} *Response sent:* \`${command}\`\n\n🖥️ *Session:* ${tmuxSession}\n\nClaude is processing your response...`,
+                { parse_mode: 'Markdown' });
+
+            this.logger.info(`Approval response - Token: ${token}, Action: ${action}, Command: ${command}`);
+
+        } catch (error) {
+            this.logger.error('Approval injection failed:', error.message);
+            await this._sendMessage(chatId,
+                `❌ *Failed to send response:* ${error.message}`,
                 { parse_mode: 'Markdown' });
         }
     }
