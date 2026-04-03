@@ -1479,24 +1479,46 @@ ${formatted}`
             // Write command to temp file to avoid shell argument length limits
             fs.writeFileSync(tmpFile, command);
 
-            // Clear current input
-            execSync(`tmux send-keys -t ${sessionName} C-u`);
+            // Paste with verification — Claude Code renders ❯ before its TUI input handler
+            // finishes initializing. If we paste during that window, tcsetattr(TCSAFLUSH)
+            // flushes the pty buffer and our paste is silently lost. Retry until it lands.
+            const pasteMaxAttempts = 5;
+            let pasteLanded = false;
+            for (let attempt = 0; attempt < pasteMaxAttempts; attempt++) {
+                // Clear current input
+                execSync(`tmux send-keys -t ${sessionName} C-u`);
+                await new Promise(r => setTimeout(r, 200));
 
-            // Load text into tmux paste buffer and paste it (handles any length/special chars)
-            execSync(`tmux load-buffer ${tmpFile}`);
-            execSync(`tmux paste-buffer -t ${sessionName}`);
+                // Load text into tmux paste buffer and paste it
+                execSync(`tmux load-buffer ${tmpFile}`);
+                execSync(`tmux paste-buffer -t ${sessionName}`);
 
-            // Wait for Claude Code to process the bracketed paste — longer texts need more time.
-            // paste-buffer wraps content in escape sequences that Claude Code must parse before
-            // it can accept Enter. 500ms is not enough for multi-line pastes.
-            const baseDelay = 1000;
-            const perLineDelay = Math.min(command.split('\n').length * 100, 3000);
-            await new Promise(r => setTimeout(r, baseDelay + perLineDelay));
+                // Wait for Claude Code to process the bracketed paste
+                const baseDelay = 1000;
+                const perLineDelay = Math.min(command.split('\n').length * 100, 3000);
+                await new Promise(r => setTimeout(r, baseDelay + perLineDelay));
+
+                // Verify paste appeared in the pane (Claude shows "[Pasted text" or the raw text)
+                const output = this._captureOutput(sessionName);
+                const firstLine = command.split('\n')[0].substring(0, 40);
+                if (output.includes('Pasted text') || output.includes(firstLine)) {
+                    if (attempt > 0) {
+                        this.logger.info(`Paste landed on attempt ${attempt + 1} for ${sessionName}`);
+                    }
+                    pasteLanded = true;
+                    break;
+                }
+                this.logger.warn(`Paste not detected (attempt ${attempt + 1}/${pasteMaxAttempts}), retrying for ${sessionName}`);
+                // Increasing backoff — give TUI more time to finish initialization
+                await new Promise(r => setTimeout(r, 1000 + attempt * 500));
+            }
+
+            if (!pasteLanded) {
+                this.logger.error(`Paste failed after ${pasteMaxAttempts} attempts for ${sessionName}`);
+                return;
+            }
 
             // Send Enter and verify Claude started processing.
-            // Check for working indicators in the output to confirm submission.
-            // Previous approach checked for '[Pasted text' which Claude Code never shows,
-            // causing the retry to always short-circuit on attempt 1.
             const workingIndicators = ['Brewing', 'Thinking', 'Working', 'Clauding',
                 'Flibbertigibbeting', 'esc to interrupt', '● Skill('];
             const maxAttempts = 5;
