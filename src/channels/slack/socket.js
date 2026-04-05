@@ -898,6 +898,31 @@ ${formatted}`
         }
     }
 
+    async _notifyOwnerDelayAlert(dagName, taskName, count, { permalink = null } = {}) {
+        const ownerId = this.config.ownerUserId;
+        if (!ownerId) return;
+
+        const lines = [
+            `:warning: *Airflow Delay Alert — Investigation Started*`,
+            `*DAG:* ${dagName}`,
+            `*Task:* ${taskName}`,
+            `*Alerts:* ${count} in window (threshold reached)`,
+        ];
+        if (permalink) {
+            lines.push(`*Slack thread:* ${permalink}`);
+        }
+
+        try {
+            await this.app.client.chat.postMessage({
+                channel: ownerId,
+                text: lines.join('\n'),
+            });
+            this.logger.info(`Owner notified: delay alert for ${dagName}`);
+        } catch (err) {
+            this.logger.error(`Failed to notify owner of delay alert ${dagName}: ${err.message}`);
+        }
+    }
+
     _setupListeners() {
         const mode = this.config.appMode || 'all';
 
@@ -1054,34 +1079,39 @@ ${formatted}`
     }
 
     async _handleDelayAlertMessage(event) {
-        // Filter out message edits and subtypes
-        if (event.subtype) return;
+        // Allow bot_message (Airflow-Bot posts via integration), filter edits/deletes/etc.
+        if (event.subtype && event.subtype !== 'bot_message') return;
 
         const channelId = event.channel;
         if (!this.delayAlertMonitor.isMonitoredChannel(channelId)) return;
 
         // Detect Airflow delay alerts
-        if (!this.delayAlertMonitor.isAirflowDelayAlert(event)) return;
-
-        const alertInfo = this.delayAlertMonitor.extractAlertInfo(event);
-        if (!alertInfo) return;
-
-        // Check task pattern match
-        if (!this.delayAlertMonitor.matchesTaskPattern(alertInfo.task)) {
-            this.logger.info(`Delay alert skipped (pattern mismatch): task=${alertInfo.task} dag=${alertInfo.dag}`);
+        if (!this.delayAlertMonitor.isAirflowDelayAlert(event)) {
+            this.logger.debug(`Delay monitor: message in monitored channel not an Airflow alert, skipping ts=${event.ts}`);
             return;
         }
 
-        const messageTs = event.ts;
-        this.logger.info(`Delay alert detected: dag=${alertInfo.dag} task=${alertInfo.task} ts=${messageTs}`);
+        const alertInfo = this.delayAlertMonitor.extractAlertInfo(event);
+        if (!alertInfo) {
+            this.logger.warn(`Delay monitor: detected Airflow alert but failed to extract task/dag, ts=${event.ts}`);
+            return;
+        }
 
-        // Increment counter (persisted to SQLite)
+        // Check task pattern match
+        if (!this.delayAlertMonitor.matchesTaskPattern(alertInfo.task)) return;
+
+        const messageTs = event.ts;
+
+        // Increment counter (persisted to SQLite) — incrementCounter logs the N/threshold progress
         const { count, triggered } = this.delayAlertMonitor.incrementCounter(alertInfo.dag, channelId, messageTs);
 
-        if (!triggered) return;
+        if (!triggered) {
+            this.logger.info(`Delay alert ${count}/${this.delayAlertMonitor.threshold}: dag=${alertInfo.dag} task=${alertInfo.task} — waiting for more`);
+            return;
+        }
 
         // Threshold reached — trigger investigation
-        this.logger.info(`Delay alert threshold reached for ${alertInfo.dag} (${count} alerts) — triggering investigation`);
+        this.logger.info(`Delay alert ${count}/${this.delayAlertMonitor.threshold}: dag=${alertInfo.dag} task=${alertInfo.task} — threshold reached, starting investigation`);
 
         // Dedup: check if we already have a session for this message
         const sessionKey = `${channelId}-${messageTs}`;
@@ -1116,6 +1146,11 @@ ${formatted}`
 
         // Reset counter after triggering (so it can accumulate again)
         this.delayAlertMonitor.resetCounter(alertInfo.dag);
+
+        // DM owner that investigation is starting
+        this._notifyOwnerDelayAlert(alertInfo.dag, alertInfo.task, count, { permalink }).catch(err =>
+            this.logger.error(`Failed to notify owner of delay alert: ${err.message}`)
+        );
 
         // Use the regular command flow — messageTs as threadTs
         await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
@@ -2258,6 +2293,22 @@ ${formatted}`
                         }
                     }
                 },
+                '/trigger-delay-alert': {
+                    post: {
+                        summary: 'Manually trigger a delay alert investigation session',
+                        description: 'Bypasses counter/threshold — immediately starts a delay alert investigation using the configured delay skill.',
+                        requestBody: {
+                            required: true,
+                            content: { 'application/json': { schema: { type: 'object', required: ['url'], properties: { url: { type: 'string', example: 'https://wego.slack.com/archives/CPP5EH3A8/p1775389830277889' } } } } }
+                        },
+                        responses: {
+                            '200': { description: 'Investigation started', content: { 'application/json': { schema: { type: 'object', properties: { status: { type: 'string' }, channelId: { type: 'string' }, messageTs: { type: 'string' }, skill: { type: 'string' } } } } } },
+                            '400': { description: 'Missing/invalid URL or bad JSON' },
+                            '409': { description: 'Session already exists for this message' },
+                            '503': { description: 'Slack app not initialized yet' }
+                        }
+                    }
+                },
                 '/sessions': {
                     get: {
                         summary: 'List active Claude tmux sessions',
@@ -2275,6 +2326,18 @@ ${formatted}`
                             '200': {
                                 description: 'Sessions killed',
                                 content: { 'application/json': { schema: { type: 'object', properties: { killed: { type: 'number' }, already_dead: { type: 'number' } } } } }
+                            }
+                        }
+                    }
+                },
+                '/delay-counters': {
+                    get: {
+                        summary: 'Show delay alert counters',
+                        description: 'Returns current alert counters per DAG with count, threshold, and time remaining in window.',
+                        responses: {
+                            '200': {
+                                description: 'Delay alert counters',
+                                content: { 'application/json': { schema: { type: 'object', properties: { threshold: { type: 'number' }, windowMs: { type: 'number' }, counters: { type: 'array', items: { type: 'object', properties: { dag: { type: 'string' }, count: { type: 'number' }, threshold: { type: 'number' }, firstSeen: { type: 'string' }, windowRemainingMs: { type: 'number' }, channelId: { type: 'string' } } } } } } } }
                             }
                         }
                     }
@@ -2459,6 +2522,114 @@ ${formatted}`
                 this.logger.error(`Trigger alert error: ${error.message}`);
                 res.status(500).json({ error: error.message });
             }
+        });
+
+        httpApp.post('/trigger-delay-alert', async (req, res) => {
+            if (!this.app) {
+                return res.status(503).json({ error: 'Slack app not initialized yet' });
+            }
+
+            const { url } = req.body || {};
+            if (!url || typeof url !== 'string') {
+                return res.status(400).json({ error: 'Missing or invalid "url" field. Provide a Slack message permalink.' });
+            }
+
+            const parsed = this._parseSlackUrl(url);
+            if (!parsed) {
+                return res.status(400).json({ error: 'Invalid Slack message URL format. Expected: https://<workspace>.slack.com/archives/<channel>/p<timestamp>' });
+            }
+
+            const channelId = parsed.channel;
+            const messageTs = parsed.ts;
+            this.logger.info(`Trigger-delay-alert received: channelId=${channelId} messageTs=${messageTs}`);
+
+            // Check for duplicate
+            const sessionKey = `${channelId}-${messageTs}`;
+            if (this._getSession(sessionKey)) {
+                this.logger.warn(`Trigger-delay-alert skipped: session already exists for ${sessionKey}`);
+                return res.status(409).json({ error: 'Session already exists for this message', channelId, messageTs });
+            }
+
+            try {
+                // Fetch the message from Slack
+                const historyResult = await this.app.client.conversations.history({
+                    channel: channelId,
+                    latest: messageTs,
+                    inclusive: true,
+                    limit: 1
+                });
+
+                const message = historyResult.messages?.[0];
+                if (!message) {
+                    return res.status(400).json({ error: 'Could not fetch message from Slack' });
+                }
+
+                const text = message.text || '';
+
+                // React with eyes
+                await this._addReaction(channelId, messageTs, 'eyes');
+
+                // Download images
+                const imagePaths = await this._downloadSlackImages(message.files, `delay-alert-${messageTs.replace('.', '')}`);
+                const imageInstruction = imagePaths.length > 0
+                    ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
+                    : '';
+
+                // Build prompt using the delay alert skill
+                const permalink = await this._getPermalink(channelId, messageTs);
+                const skill = this.delayAlertMonitor.skill;
+                let prompt;
+                if (skill && permalink) {
+                    prompt = `execute ${skill} skill with argument ${permalink}${imageInstruction}`;
+                } else if (skill) {
+                    prompt = `execute ${skill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
+                } else if (permalink) {
+                    prompt = `Investigate this Airflow delay alert: ${permalink}${imageInstruction}`;
+                } else {
+                    prompt = `Investigate this Airflow delay alert: ${text.substring(0, 500)}${imageInstruction}`;
+                }
+
+                // DM owner that investigation is starting (manual trigger)
+                const alertInfo = this.delayAlertMonitor.extractAlertInfo(message);
+                this._notifyOwnerDelayAlert(
+                    alertInfo?.dag || 'manual-trigger',
+                    alertInfo?.task || 'N/A',
+                    0,
+                    { permalink }
+                ).catch(err =>
+                    this.logger.error(`Failed to notify owner of delay alert: ${err.message}`)
+                );
+
+                // Use the regular command flow
+                await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
+                res.json({ status: 'investigating', channelId, messageTs, skill: skill || 'none' });
+            } catch (error) {
+                this.logger.error(`Trigger delay alert error: ${error.message}`);
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        httpApp.get('/delay-counters', (req, res) => {
+            const now = Date.now();
+            const rows = this.delayAlertMonitor.getAllCounters();
+            const threshold = this.delayAlertMonitor.threshold;
+            const windowMs = this.delayAlertMonitor.windowMs;
+            const counters = rows.map(r => {
+                const elapsed = now - r.first_seen_at;
+                const remaining = Math.max(0, windowMs - elapsed);
+                return {
+                    dag: r.dag_name,
+                    count: r.count,
+                    threshold,
+                    progress: `${r.count}/${threshold}`,
+                    firstSeen: new Date(r.first_seen_at).toISOString(),
+                    windowRemainingMs: remaining,
+                    windowRemaining: `${Math.round(remaining / 60000)}m`,
+                    expired: remaining === 0,
+                    channelId: r.channel_id,
+                };
+            });
+            res.json({ threshold, windowMs, counters });
         });
 
         httpApp.get('/sessions', (req, res) => {

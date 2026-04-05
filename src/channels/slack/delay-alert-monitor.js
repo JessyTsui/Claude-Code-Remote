@@ -120,6 +120,16 @@ class DelayAlertMonitor {
                         this.monitoredChannelIds.add(channel.id);
                         unresolved.delete(channel.name);
                         this.logger.info(`Resolved delay channel: #${channel.name} → ${channel.id}`);
+
+                        // Auto-join so the bot receives message events
+                        if (!channel.is_member) {
+                            try {
+                                await this.app.client.conversations.join({ channel: channel.id });
+                                this.logger.info(`Joined delay channel: #${channel.name}`);
+                            } catch (joinErr) {
+                                this.logger.warn(`Failed to join #${channel.name}: ${joinErr.message}`);
+                            }
+                        }
                     }
                 }
 
@@ -150,10 +160,10 @@ class DelayAlertMonitor {
      */
     isAirflowDelayAlert(event) {
         const text = event.text || '';
-        // Check for Airflow delay alert patterns (bold markdown format)
-        const hasTask = /\*Task\*\s*:/i.test(text);
-        const hasDag = /\*Dag\*\s*:/i.test(text);
-        const hasExecTime = /\*Execution Time\*\s*:/i.test(text);
+        // Check for Airflow delay alert patterns (with or without bold markdown)
+        const hasTask = /\*?Task\*?\s*:/i.test(text);
+        const hasDag = /\*?Dag\*?\s*:/i.test(text);
+        const hasExecTime = /\*?Execution Time\*?\s*:/i.test(text);
 
         // Must have at least Task and Dag to be considered an Airflow alert
         return hasTask && hasDag && hasExecTime;
@@ -166,8 +176,8 @@ class DelayAlertMonitor {
     extractAlertInfo(event) {
         const text = event.text || '';
 
-        const taskMatch = text.match(/\*Task\*\s*:\s*(.+?)(?:\n|$)/i);
-        const dagMatch = text.match(/\*Dag\*\s*:\s*(.+?)(?:\n|$)/i);
+        const taskMatch = text.match(/\*?Task\*?\s*:\s*(.+?)(?:\n|$)/i);
+        const dagMatch = text.match(/\*?Dag\*?\s*:\s*(.+?)(?:\n|$)/i);
 
         if (!taskMatch || !dagMatch) return null;
 

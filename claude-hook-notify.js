@@ -47,6 +47,49 @@ function readStdin() {
 }
 
 /**
+ * For alert sessions: scan transcript for the assistant message containing the investigation report.
+ * Returns the longest message with "Recommended Action:" marker, or null if not found.
+ */
+function extractAlertReport(transcriptPath) {
+    if (!transcriptPath || !fs.existsSync(transcriptPath)) return null;
+
+    const content = fs.readFileSync(transcriptPath, 'utf-8').trim();
+    if (!content) return null;
+
+    let bestReport = null;
+
+    for (const line of content.split('\n')) {
+        try {
+            const entry = JSON.parse(line);
+            if (entry.type !== 'assistant' || !entry.message?.content) continue;
+
+            let text = '';
+            if (typeof entry.message.content === 'string') {
+                text = entry.message.content;
+            } else if (Array.isArray(entry.message.content)) {
+                text = entry.message.content
+                    .filter(item => item.type === 'text')
+                    .map(item => item.text)
+                    .join('\n');
+            }
+
+            text = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '');
+            text = text.replace(/\n{3,}/g, '\n\n').trim();
+
+            if (text && /Recommended Action:/i.test(text)) {
+                if (!bestReport || text.length > bestReport.length) {
+                    bestReport = text;
+                }
+            }
+        } catch {
+            continue;
+        }
+    }
+
+    return bestReport;
+}
+
+/**
  * Fallback: Parse a Claude Code JSONL transcript and extract the last assistant text message.
  */
 function extractFromTranscript(transcriptPath) {
@@ -314,8 +357,18 @@ async function sendHookNotification() {
     const web = new WebClient(process.env.SLACK_BOT_TOKEN);
 
     // Get Claude's response: prefer last_assistant_message, fallback to transcript parsing
-    const assistantMessage = hookInput.last_assistant_message
+    let assistantMessage = hookInput.last_assistant_message
         || extractFromTranscript(hookInput.transcript_path);
+
+    // For alert sessions: last_assistant_message is often a cleanup message, not the report.
+    // Scan transcript for the message containing the actual investigation report.
+    if (isAlertSession && hookInput.transcript_path) {
+        const report = extractAlertReport(hookInput.transcript_path);
+        if (report) {
+            console.log(`Alert report found in transcript (${report.length} chars), overriding last_assistant_message (${(assistantMessage || '').length} chars)`);
+            assistantMessage = report;
+        }
+    }
 
     // Extract session stats from transcript (model, tokens, context %)
     const stats = extractSessionStats(hookInput.transcript_path);

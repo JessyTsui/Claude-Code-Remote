@@ -74,6 +74,16 @@ class AlertMonitor {
                         this.monitoredChannelIds.add(channel.id);
                         unresolved.delete(channel.name);
                         this.logger.info(`Resolved channel: #${channel.name} → ${channel.id}`);
+
+                        // Auto-join so the bot receives message events
+                        if (!channel.is_member) {
+                            try {
+                                await this.app.client.conversations.join({ channel: channel.id });
+                                this.logger.info(`Joined monitor channel: #${channel.name}`);
+                            } catch (joinErr) {
+                                this.logger.warn(`Failed to join #${channel.name}: ${joinErr.message}`);
+                            }
+                        }
                     }
                 }
 
