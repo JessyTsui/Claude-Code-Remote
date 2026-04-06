@@ -409,10 +409,9 @@ async function sendHookNotification() {
                 }
 
                 if (alreadyPosted) {
-                    // Alert investigation already posted — treat follow-up as regular response
-                    console.log(`Alert response already posted — posting follow-up as regular response`);
-                    await sendResponse(web, channelId, threadTs, assistantMessage, stats, lastUserId);
-                    console.log(`Follow-up response posted (${assistantMessage.length} chars) to ${channelId} thread=${threadTs}`);
+                    // Alert investigation already posted by poller — skip to avoid duplicate.
+                    // Follow-up @mentions are handled by the poller, not the hook.
+                    console.log(`Alert response already posted — skipping hook (poller handles this)`);
                     return;
                 }
 
