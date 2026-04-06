@@ -1600,7 +1600,7 @@ ${formatted}`
         let isFirstResponse = isAlertSession; // only true for the very first response of an alert
         let alertBuffer = '';
         let alertAccumulationCount = 0;
-        let alertSummaryJustPosted = false; // suppress anchor-lost duplicate right after alert summary
+        let alertSummaryPostedAt = 0; // suppress duplicates for 30s after alert summary
         const alertStableThreshold = 8; // 8s stability for alert first response (vs 3s regular)
 
         if (this.pollers.has(pollKey)) {
@@ -1739,7 +1739,7 @@ ${formatted}`
                                     const sessionStats = this._extractSessionStats(currentOutput);
                                     await this._sendAlertSummary(say, threadTs, alertBuffer, sessionStats);
                                     isFirstResponse = false;
-                                    alertSummaryJustPosted = true;
+                                    alertSummaryPostedAt = Date.now();
                                     alertBuffer = '';
                                     alertAccumulationCount = 0;
                                     this.logger.info(`Alert summary sent to Slack thread ${threadTs}`);
@@ -1766,10 +1766,9 @@ ${formatted}`
                             return;
                         }
 
-                        // Skip duplicate that leaks via anchor-lost fallback right after alert summary
-                        if (alertSummaryJustPosted) {
-                            this.logger.info(`Skipping post-alert-summary response (${response.length} chars, likely anchor-lost duplicate) for ${sessionName}`);
-                            alertSummaryJustPosted = false;
+                        // Skip duplicates that leak via anchor-lost fallback after alert summary (30s window)
+                        if (alertSummaryPostedAt && (Date.now() - alertSummaryPostedAt < 30000)) {
+                            this.logger.info(`Skipping post-alert-summary response (${response.length} chars, ${Math.round((Date.now() - alertSummaryPostedAt) / 1000)}s after summary) for ${sessionName}`);
                             baselineOutput = currentOutput;
                             lastOutput = currentOutput;
                             stableCount = 0;
