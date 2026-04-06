@@ -1600,7 +1600,6 @@ ${formatted}`
         let isFirstResponse = isAlertSession; // only true for the very first response of an alert
         let alertBuffer = '';
         let alertAccumulationCount = 0;
-        let alertSummaryPostedAt = 0; // suppress duplicates for 30s after alert summary
         const alertStableThreshold = 8; // 8s stability for alert first response (vs 3s regular)
 
         if (this.pollers.has(pollKey)) {
@@ -1739,16 +1738,20 @@ ${formatted}`
                                     const sessionStats = this._extractSessionStats(currentOutput);
                                     await this._sendAlertSummary(say, threadTs, alertBuffer, sessionStats);
                                     isFirstResponse = false;
-                                    alertSummaryPostedAt = Date.now();
                                     alertBuffer = '';
                                     alertAccumulationCount = 0;
-                                    this.logger.info(`Alert summary sent to Slack thread ${threadTs}`);
+                                    this.logger.info(`Alert summary sent to Slack thread ${threadTs} — stopping poller (investigation complete)`);
 
                                     if (sessionKey) {
                                         const nowTs = String(Date.now() / 1000);
                                         this._updateLastBotTs(sessionKey, nowTs);
                                         this._startSessionTimeout(sessionKey);
                                     }
+
+                                    // Stop poller — investigation is done. Follow-up @mentions start a fresh poller.
+                                    clearInterval(interval);
+                                    this.pollers.delete(pollKey);
+                                    return;
                                 } catch (err) {
                                     this.logger.error(`Failed to send alert summary to Slack: ${err.message}`);
                                 } finally {
@@ -1759,16 +1762,6 @@ ${formatted}`
                             }
 
                             // Always reset baseline so next diff is incremental
-                            baselineOutput = currentOutput;
-                            lastOutput = currentOutput;
-                            stableCount = 0;
-                            attempts = 0;
-                            return;
-                        }
-
-                        // Skip duplicates that leak via anchor-lost fallback after alert summary (30s window)
-                        if (alertSummaryPostedAt && (Date.now() - alertSummaryPostedAt < 30000)) {
-                            this.logger.info(`Skipping post-alert-summary response (${response.length} chars, ${Math.round((Date.now() - alertSummaryPostedAt) / 1000)}s after summary) for ${sessionName}`);
                             baselineOutput = currentOutput;
                             lastOutput = currentOutput;
                             stableCount = 0;
