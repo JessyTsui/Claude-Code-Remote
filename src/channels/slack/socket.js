@@ -1600,6 +1600,7 @@ ${formatted}`
         let isFirstResponse = isAlertSession; // only true for the very first response of an alert
         let alertBuffer = '';
         let alertAccumulationCount = 0;
+        let alertSummaryJustPosted = false; // suppress anchor-lost duplicate right after alert summary
         const alertStableThreshold = 8; // 8s stability for alert first response (vs 3s regular)
 
         if (this.pollers.has(pollKey)) {
@@ -1738,6 +1739,7 @@ ${formatted}`
                                     const sessionStats = this._extractSessionStats(currentOutput);
                                     await this._sendAlertSummary(say, threadTs, alertBuffer, sessionStats);
                                     isFirstResponse = false;
+                                    alertSummaryJustPosted = true;
                                     alertBuffer = '';
                                     alertAccumulationCount = 0;
                                     this.logger.info(`Alert summary sent to Slack thread ${threadTs}`);
@@ -1757,6 +1759,17 @@ ${formatted}`
                             }
 
                             // Always reset baseline so next diff is incremental
+                            baselineOutput = currentOutput;
+                            lastOutput = currentOutput;
+                            stableCount = 0;
+                            attempts = 0;
+                            return;
+                        }
+
+                        // Skip duplicate that leaks via anchor-lost fallback right after alert summary
+                        if (alertSummaryJustPosted) {
+                            this.logger.info(`Skipping post-alert-summary response (${response.length} chars, likely anchor-lost duplicate) for ${sessionName}`);
+                            alertSummaryJustPosted = false;
                             baselineOutput = currentOutput;
                             lastOutput = currentOutput;
                             stableCount = 0;
