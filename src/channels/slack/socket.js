@@ -1399,7 +1399,19 @@ ${formatted}`
             }
 
             // Inject the command into the tmux session
-            await this._injectCommand(session.sessionName, fullCommand);
+            try {
+                await this._injectCommand(session.sessionName, fullCommand);
+            } catch (injectError) {
+                this.logger.error(`Injection failed for ${session.sessionName}: ${injectError.message}`);
+                if (session.alertMessageTs) {
+                    await this._removeReaction(channelId, session.alertMessageTs, 'eyes');
+                    await this._addReaction(channelId, session.alertMessageTs, 'x');
+                }
+                await say({ text: `:warning: ${injectError.message}. Try sending your message again.`, thread_ts: threadTs });
+                // Restart session timeout so it gets cleaned up
+                this._startSessionTimeout(sessionKey);
+                return;
+            }
             this.logger.info(`Command injected into ${session.sessionName}: ${fullCommand.substring(0, 120)}`);
 
             // Commands like /compact don't produce a standard response — just confirm
@@ -1533,12 +1545,18 @@ ${formatted}`
                 const perLineDelay = Math.min(command.split('\n').length * 100, 3000);
                 await new Promise(r => setTimeout(r, baseDelay + perLineDelay));
 
-                // Verify paste appeared in the pane (Claude shows "[Pasted text" or the raw text)
+                // Verify paste appeared in the pane — check multiple indicators:
+                // 1. Claude shows "[Pasted text" banner for multi-line pastes
+                // 2. The first line of the command appears in the visible pane
+                // 3. Claude already started working (paste + auto-submit succeeded)
                 const output = this._captureOutput(sessionName);
                 const firstLine = command.split('\n')[0].substring(0, 40);
-                if (output.includes('Pasted text') || output.includes(firstLine)) {
+                const workingIndicators = ['Brewing', 'Thinking', 'Working', 'Clauding',
+                    'Flibbertigibbeting', 'esc to interrupt', '● Skill('];
+                const isAlreadyWorking = workingIndicators.some(ind => output.includes(ind));
+                if (output.includes('Pasted text') || output.includes(firstLine) || isAlreadyWorking) {
                     if (attempt > 0) {
-                        this.logger.info(`Paste landed on attempt ${attempt + 1} for ${sessionName}`);
+                        this.logger.info(`Paste landed on attempt ${attempt + 1} for ${sessionName}${isAlreadyWorking ? ' (already working)' : ''}`);
                     }
                     pasteLanded = true;
                     break;
@@ -1549,8 +1567,7 @@ ${formatted}`
             }
 
             if (!pasteLanded) {
-                this.logger.error(`Paste failed after ${pasteMaxAttempts} attempts for ${sessionName}`);
-                return;
+                throw new Error(`Paste failed after ${pasteMaxAttempts} attempts — Claude may not be ready`);
             }
 
             // Send Enter and verify Claude started processing.
@@ -1565,13 +1582,30 @@ ${formatted}`
 
                 const output = this._captureOutput(sessionName);
                 const isWorking = workingIndicators.some(ind => output.includes(ind));
+                // Also check if Claude already finished (prompt visible again) — means it
+                // processed the command very quickly (e.g. "hi") before we could detect working state
+                const hasPrompt = /^[)❯>]\s*$/m.test(output);
                 if (isWorking) {
                     if (attempt > 0) {
                         this.logger.info(`Enter accepted on attempt ${attempt + 1} for ${sessionName}`);
                     }
                     return;
                 }
+                if (hasPrompt && attempt >= 1) {
+                    // Prompt visible after at least 2 Enter attempts — Claude likely processed
+                    // the command quickly and is waiting for the next one. The Stop hook
+                    // already fired (or will fire), so don't keep retrying.
+                    this.logger.info(`Prompt visible after Enter attempt ${attempt + 1} — Claude likely already responded for ${sessionName}`);
+                    return;
+                }
                 this.logger.warn(`Enter not confirmed (attempt ${attempt + 1}/${maxAttempts}), retrying for ${sessionName}`);
+            }
+            // After all retries, check one final time — if Claude shows prompt, it processed the command
+            const finalOutput = this._captureOutput(sessionName);
+            const finalHasPrompt = /^[)❯>]\s*$/m.test(finalOutput);
+            if (finalHasPrompt) {
+                this.logger.info(`Prompt visible after all Enter attempts — Claude likely already responded for ${sessionName}`);
+                return;
             }
             this.logger.error(`Enter may not have been accepted after ${maxAttempts} attempts for ${sessionName}`);
         } finally {
