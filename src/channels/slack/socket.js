@@ -1551,9 +1551,10 @@ ${formatted}`
                 // 3. Claude already started working (paste + auto-submit succeeded)
                 const output = this._captureOutput(sessionName);
                 const firstLine = command.split('\n')[0].substring(0, 40);
-                const workingIndicators = ['Brewing', 'Thinking', 'Working', 'Clauding',
-                    'Flibbertigibbeting', 'esc to interrupt', '● Skill('];
-                const isAlreadyWorking = workingIndicators.some(ind => output.includes(ind));
+                const workingIndicators = ['brewing', 'thinking', 'working', 'clauding',
+                    'flibbertigibbeting', 'esc to interrupt', '● skill(', 'crunching'];
+                const outputLower = output.toLowerCase();
+                const isAlreadyWorking = workingIndicators.some(ind => outputLower.includes(ind));
                 if (output.includes('Pasted text') || output.includes(firstLine) || isAlreadyWorking) {
                     if (attempt > 0) {
                         this.logger.info(`Paste landed on attempt ${attempt + 1} for ${sessionName}${isAlreadyWorking ? ' (already working)' : ''}`);
@@ -1571,8 +1572,8 @@ ${formatted}`
             }
 
             // Send Enter and verify Claude started processing.
-            const workingIndicators = ['Brewing', 'Thinking', 'Working', 'Clauding',
-                'Flibbertigibbeting', 'esc to interrupt', '● Skill('];
+            const workingIndicators = ['brewing', 'thinking', 'working', 'clauding',
+                'flibbertigibbeting', 'esc to interrupt', '● skill(', 'crunching'];
             const maxAttempts = 5;
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 execSync(`tmux send-keys -t ${sessionName} Enter`);
@@ -1581,7 +1582,7 @@ ${formatted}`
                 await new Promise(r => setTimeout(r, waitMs));
 
                 const output = this._captureOutput(sessionName);
-                const isWorking = workingIndicators.some(ind => output.includes(ind));
+                const isWorking = workingIndicators.some(ind => output.toLowerCase().includes(ind));
                 // Also check if Claude already finished (prompt visible again) — means it
                 // processed the command very quickly (e.g. "hi") before we could detect working state
                 const hasPrompt = /^[)❯>]\s*$/m.test(output);
@@ -1725,14 +1726,17 @@ ${formatted}`
                 });
 
                 // Only check tail lines for working indicators — old history
-                // in the 200-line tmux buffer would cause false positives
-                const tailText = tailLines.join(' ');
+                // in the 200-line tmux buffer would cause false positives.
+                // Case-insensitive: OMC status bar uses lowercase ("thinking")
+                // while Claude Code native UI uses capitalized ("Thinking").
+                const tailText = tailLines.join(' ').toLowerCase();
                 const isWorking =
-                    tailText.includes('Clauding') ||
-                    tailText.includes('Working') ||
-                    tailText.includes('Processing') ||
+                    tailText.includes('clauding') ||
+                    tailText.includes('working') ||
+                    tailText.includes('processing') ||
                     tailText.includes('⏳') ||
-                    tailText.includes('Thinking');
+                    tailText.includes('thinking') ||
+                    tailText.includes('crunching');
 
                 if (attempts % 10 === 0) {
                     const lastFiveLines = lines.slice(-5).map(l => l.trim()).join(' | ');
