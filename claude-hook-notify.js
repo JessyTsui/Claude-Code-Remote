@@ -360,16 +360,6 @@ async function sendHookNotification() {
     let assistantMessage = hookInput.last_assistant_message
         || extractFromTranscript(hookInput.transcript_path);
 
-    // For alert sessions: last_assistant_message is often a cleanup message, not the report.
-    // Scan transcript for the message containing the actual investigation report.
-    if (isAlertSession && hookInput.transcript_path) {
-        const report = extractAlertReport(hookInput.transcript_path);
-        if (report) {
-            console.log(`Alert report found in transcript (${report.length} chars), overriding last_assistant_message (${(assistantMessage || '').length} chars)`);
-            assistantMessage = report;
-        }
-    }
-
     // Extract session stats from transcript (model, tokens, context %)
     const stats = extractSessionStats(hookInput.transcript_path);
 
@@ -393,7 +383,7 @@ async function sendHookNotification() {
                     return;
                 }
 
-                // Check if we already posted a response (avoid duplicates from multiple Stop events)
+                // Check if alert summary was already posted (by poller or earlier hook)
                 let alreadyPosted = false;
                 try {
                     const replies = await web.conversations.replies({
@@ -409,50 +399,61 @@ async function sendHookNotification() {
                 }
 
                 if (alreadyPosted) {
-                    // Alert investigation already posted by poller — skip to avoid duplicate.
-                    // Follow-up @mentions are handled by the poller, not the hook.
-                    console.log(`Alert response already posted — skipping hook (poller handles this)`);
-                    return;
+                    // Alert summary already posted. This is a follow-up @mention response —
+                    // post as regular response (no "Recommended Action:" format, no file upload).
+                    // Use the original last_assistant_message, NOT extractAlertReport().
+                    console.log(`Alert summary already posted — posting follow-up as regular response`);
+                    await sendResponse(web, channelId, threadTs, assistantMessage, stats, lastUserId);
+                    console.log(`Follow-up response posted (${assistantMessage.length} chars) to ${channelId} thread=${threadTs}`);
+                } else {
+                    // First alert response: override assistantMessage with the full investigation
+                    // report from transcript (last_assistant_message is often a cleanup message).
+                    if (hookInput.transcript_path) {
+                        const report = extractAlertReport(hookInput.transcript_path);
+                        if (report) {
+                            console.log(`Alert report found in transcript (${report.length} chars), overriding last_assistant_message (${(assistantMessage || '').length} chars)`);
+                            assistantMessage = report;
+                        }
+                    }
+
+                    // Post summary + upload full report
+                    const match = assistantMessage.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*)/i);
+                    const summary = match ? match[1].trim() : (
+                        assistantMessage.match(/Recommended Action:\s*(.+(?:\n(?!\n).+)*)/i)?.[1]?.trim()
+                        || assistantMessage.substring(0, 500).trim()
+                    );
+
+                    const maxSummaryLen = 2970;
+                    const trimmedSummary = summary.length > maxSummaryLen
+                        ? summary.substring(0, maxSummaryLen) + '…' : summary;
+                    const alertBlocks = [
+                        { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${trimmedSummary}` } }
+                    ];
+                    if (stats) {
+                        const statsLine = `_${stats.model} · Ctx: ${stats.context} · In: ${stats.tokensIn} Out: ${stats.tokensOut}_`;
+                        alertBlocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: statsLine }] });
+                    }
+
+                    await web.chat.postMessage({
+                        channel: channelId,
+                        text: `Recommended Action: ${summary}`,
+                        thread_ts: threadTs,
+                        blocks: alertBlocks
+                    });
+
+                    await web.filesUploadV2({
+                        channel_id: channelId,
+                        thread_ts: threadTs,
+                        content: assistantMessage,
+                        filename: `alert-investigation-${Date.now()}.txt`,
+                        title: 'Full Investigation Report',
+                        initial_comment: '_Full investigation details attached._',
+                    });
+
+                    console.log(`Alert response posted (${assistantMessage.length} chars) to ${channelId} thread=${threadTs}`);
                 }
-
-                // Post summary + upload full report
-                const match = assistantMessage.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*)/i);
-                const summary = match ? match[1].trim() : (
-                    // Fallback: take text between "Recommended Action:" and next double newline, or first 500 chars
-                    assistantMessage.match(/Recommended Action:\s*(.+(?:\n(?!\n).+)*)/i)?.[1]?.trim()
-                    || assistantMessage.substring(0, 500).trim()
-                );
-
-                const maxSummaryLen = 2970; // 3000 limit minus "*Recommended Action:* " prefix
-                const trimmedSummary = summary.length > maxSummaryLen
-                    ? summary.substring(0, maxSummaryLen) + '…' : summary;
-                const alertBlocks = [
-                    { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${trimmedSummary}` } }
-                ];
-                if (stats) {
-                    const statsLine = `_${stats.model} · Ctx: ${stats.context} · In: ${stats.tokensIn} Out: ${stats.tokensOut}_`;
-                    alertBlocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: statsLine }] });
-                }
-
-                await web.chat.postMessage({
-                    channel: channelId,
-                    text: `Recommended Action: ${summary}`,
-                    thread_ts: threadTs,
-                    blocks: alertBlocks
-                });
-
-                await web.filesUploadV2({
-                    channel_id: channelId,
-                    thread_ts: threadTs,
-                    content: assistantMessage,
-                    filename: `alert-investigation-${Date.now()}.txt`,
-                    title: 'Full Investigation Report',
-                    initial_comment: '_Full investigation details attached._',
-                });
 
                 // Reaction swap (👀→✅) is handled by socket handler on session cleanup (timeout, /exit, or reconciliation)
-
-                console.log(`Alert response posted (${assistantMessage.length} chars) to ${channelId} thread=${threadTs}`);
             } else {
                 // Regular session: post clean response with stats, mention last user
                 await sendResponse(web, channelId, threadTs, assistantMessage, stats, lastUserId);
