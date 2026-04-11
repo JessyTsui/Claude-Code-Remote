@@ -76,7 +76,12 @@ function extractAlertReport(transcriptPath) {
             text = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '');
             text = text.replace(/\n{3,}/g, '\n\n').trim();
 
-            if (text && /Recommended Action:/i.test(text)) {
+            // Use stricter matching to avoid intermediate narration
+            // (e.g. "Recommended Action: All agent definitions loaded...").
+            // Real reports use markdown headings or bold and are 500+ chars.
+            const MIN_REPORT_LEN = 500;
+            if (text && text.length >= MIN_REPORT_LEN
+                && /(?:^|\n)(?:#{1,3}\s+)?(?:\*\*)?Recommended Action(?:\*\*)?:/im.test(text)) {
                 if (!bestReport || text.length > bestReport.length) {
                     bestReport = text;
                 }
@@ -408,47 +413,81 @@ async function sendHookNotification() {
                 } else {
                     // First alert response: override assistantMessage with the full investigation
                     // report from transcript (last_assistant_message is often a cleanup message).
+                    let hasValidReport = false;
                     if (hookInput.transcript_path) {
                         const report = extractAlertReport(hookInput.transcript_path);
                         if (report) {
                             console.log(`Alert report found in transcript (${report.length} chars), overriding last_assistant_message (${(assistantMessage || '').length} chars)`);
                             assistantMessage = report;
+                            hasValidReport = true;
                         }
                     }
 
-                    // Post summary + upload full report
-                    const match = assistantMessage.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*)/i);
-                    const summary = match ? match[1].trim() : (
-                        assistantMessage.match(/Recommended Action:\s*(.+(?:\n(?!\n).+)*)/i)?.[1]?.trim()
-                        || assistantMessage.substring(0, 500).trim()
-                    );
-
-                    const maxSummaryLen = 2970;
-                    const trimmedSummary = summary.length > maxSummaryLen
-                        ? summary.substring(0, maxSummaryLen) + '…' : summary;
-                    const alertBlocks = [
-                        { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${trimmedSummary}` } }
-                    ];
-                    if (stats) {
-                        const statsLine = `_${stats.model} · Ctx: ${stats.context} · In: ${stats.tokensIn} Out: ${stats.tokensOut}_`;
-                        alertBlocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: statsLine }] });
+                    // Fallback: check if assistantMessage itself qualifies as a real report
+                    if (!hasValidReport && assistantMessage && assistantMessage.length >= 500
+                        && /(?:^|\n)(?:#{1,3}\s+)?(?:\*\*)?Recommended Action(?:\*\*)?:/im.test(assistantMessage)) {
+                        hasValidReport = true;
                     }
 
-                    await web.chat.postMessage({
-                        channel: channelId,
-                        text: `Recommended Action: ${summary}`,
-                        thread_ts: threadTs,
-                        blocks: alertBlocks
-                    });
+                    if (hasValidReport) {
+                        // Post summary + upload full report
+                        const match = assistantMessage.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*)/i);
+                        const summary = match ? match[1].trim() : (
+                            assistantMessage.match(/Recommended Action:\s*(.+(?:\n(?!\n).+)*)/i)?.[1]?.trim()
+                            || assistantMessage.substring(0, 500).trim()
+                        );
 
-                    await web.filesUploadV2({
-                        channel_id: channelId,
-                        thread_ts: threadTs,
-                        content: assistantMessage,
-                        filename: `alert-investigation-${Date.now()}.txt`,
-                        title: 'Full Investigation Report',
-                        initial_comment: '_Full investigation details attached._',
-                    });
+                        const maxSummaryLen = 2970;
+                        const trimmedSummary = summary.length > maxSummaryLen
+                            ? summary.substring(0, maxSummaryLen) + '…' : summary;
+                        const alertBlocks = [
+                            { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${trimmedSummary}` } }
+                        ];
+                        if (stats) {
+                            const statsLine = `_${stats.model} · Ctx: ${stats.context} · In: ${stats.tokensIn} Out: ${stats.tokensOut}_`;
+                            alertBlocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: statsLine }] });
+                        }
+
+                        await web.chat.postMessage({
+                            channel: channelId,
+                            text: `Recommended Action: ${summary}`,
+                            thread_ts: threadTs,
+                            blocks: alertBlocks
+                        });
+
+                        await web.filesUploadV2({
+                            channel_id: channelId,
+                            thread_ts: threadTs,
+                            content: assistantMessage,
+                            filename: `alert-investigation-${Date.now()}.txt`,
+                            title: 'Full Investigation Report',
+                            initial_comment: '_Full investigation details attached._',
+                        });
+                    } else {
+                        // No valid report — Claude likely hung or exited before completing investigation
+                        console.log(`No valid alert report found (assistantMessage: ${(assistantMessage || '').length} chars) — posting incomplete notice`);
+                        await web.chat.postMessage({
+                            channel: channelId,
+                            text: ':warning: Investigation incomplete — Claude exited before producing a report.',
+                            thread_ts: threadTs,
+                        });
+
+                        // Upload raw Claude output so owner can debug what happened (tmux is gone by now)
+                        if (assistantMessage) {
+                            try {
+                                await web.filesUploadV2({
+                                    channel_id: channelId,
+                                    thread_ts: threadTs,
+                                    content: assistantMessage,
+                                    filename: `alert-raw-output-${Date.now()}.txt`,
+                                    title: 'Raw Claude Output (debug)',
+                                    initial_comment: '_Raw Claude output attached for debugging._',
+                                });
+                            } catch (err) {
+                                console.error(`Failed to upload raw debug output: ${err.message}`);
+                            }
+                        }
+                    }
 
                     console.log(`Alert response posted (${assistantMessage.length} chars) to ${channelId} thread=${threadTs}`);
                 }

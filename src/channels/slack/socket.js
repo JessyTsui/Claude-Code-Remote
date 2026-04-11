@@ -2245,6 +2245,35 @@ ${formatted}`
      * Send alert summary: Recommended Action as Slack message + full report as file upload.
      */
     async _sendAlertSummary(say, threadTs, response, stats) {
+        // Validate content quality: reject intermediate narration / partial output.
+        // Real investigation reports are 500+ chars and contain a proper "Recommended Action" heading.
+        const MIN_REPORT_LEN = 500;
+        const isValidReport = response && response.length >= MIN_REPORT_LEN
+            && /(?:^|\n)(?:#{1,3}\s+)?(?:\*\*)?Recommended Action(?:\*\*)?:/im.test(response);
+
+        if (!isValidReport) {
+            this.logger.warn(`Alert summary rejected: content doesn't look like a real report (${(response || '').length} chars) — posting incomplete notice`);
+            await say({ text: ':warning: Investigation incomplete — Claude exited before producing a report.', thread_ts: threadTs });
+
+            // Upload raw Claude output so owner can debug what happened (tmux is gone by now)
+            if (response) {
+                try {
+                    const channelId = this._getChannelForThread(threadTs);
+                    await this.app.client.filesUploadV2({
+                        channel_id: channelId || this.config.channelId,
+                        thread_ts: threadTs,
+                        content: response,
+                        filename: `alert-raw-output-${Date.now()}.txt`,
+                        title: 'Raw Claude Output (debug)',
+                        initial_comment: '_Raw Claude output attached for debugging._',
+                    });
+                } catch (err) {
+                    this.logger.error(`Failed to upload raw debug output: ${err.message}`);
+                }
+            }
+            return;
+        }
+
         const summary = this._extractRecommendedAction(response);
         const statsLine = stats
             ? `\n_${stats.model || ''} · Ctx: ${stats.context || '?'} · In: ${stats.tokensIn || '?'} Out: ${stats.tokensOut || '?'}_`
