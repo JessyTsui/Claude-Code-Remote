@@ -1434,6 +1434,7 @@ ${formatted}`
             // The hook handles final posting, but the poller nudges Claude if it stalls
             // mid-investigation (sits at prompt without completing the report).
             if (session.alertMessageTs) {
+                this.logger.info(`Starting alert poller for ${session.sessionName} (alertMessageTs=${session.alertMessageTs})`);
                 this._pollForResponse(session, say, sessionKey);
             }
 
@@ -1637,6 +1638,7 @@ ${formatted}`
         const { sessionName, threadTs } = session;
         const pollKey = sessionName;
         const isAlertSession = !!session.alertMessageTs;
+        this.logger.info(`Poller starting for ${sessionName} (alert=${isAlertSession})`);
         let isFirstResponse = isAlertSession; // only true for the very first response of an alert
         let alertBuffer = '';
         let alertAccumulationCount = 0;
@@ -1659,6 +1661,7 @@ ${formatted}`
         const stableThreshold = 3;
 
         const interval = setInterval(async () => {
+            try {
             if (processing) return;
 
             // Stop if tmux session died
@@ -1714,75 +1717,69 @@ ${formatted}`
                 lastOutput = currentOutput;
             }
 
+            // Check prompt and working state on every tick (not gated by stableCount).
+            // Claude's animated timer ("35s", "36s"...) changes output every second,
+            // so stableCount never reaches the threshold. Prompt/stall detection must
+            // run independently.
+            const lines = currentOutput.trimEnd().split('\n');
+            const tailLines = lines.slice(-10);
+            const hasPrompt = tailLines.some(l => {
+                const trimmed = l.trim();
+                return trimmed === '❯' || trimmed === '>' ||
+                       trimmed.match(/^[>❯]\s*$/) ||
+                       trimmed.includes('│ >') || trimmed.includes('│ ❯');
+            });
+
+            // Exclude OMC status bar lines (contain "[OMC#") from isWorking check —
+            // the status bar can show stale "thinking" even when Claude is idle.
+            const nonStatusLines = tailLines.filter(l => !l.includes('[OMC#'));
+            const tailText = nonStatusLines.join(' ').toLowerCase();
+            const isWorking =
+                tailText.includes('clauding') ||
+                tailText.includes('working') ||
+                tailText.includes('processing') ||
+                tailText.includes('⏳') ||
+                tailText.includes('thinking') ||
+                tailText.includes('crunching');
+
+            if (attempts % 10 === 0) {
+                const lastFiveLines = lines.slice(-5).map(l => l.trim()).join(' | ');
+                this.logger.info(`Poll #${attempts} | stable=${stableCount} prompt=${hasPrompt} working=${isWorking} | ${lastFiveLines.substring(0, 120)}`);
+            }
+
+            // Alert stall detection: runs every tick, not gated by stableCount.
+            // If Claude is at the prompt and not working, nudge it to continue.
+            if (isAlertSession && isFirstResponse && hasPrompt && !isWorking) {
+                alertStallCount++;
+                if (alertStallCount >= ALERT_STALL_THRESHOLD && alertNudgeCount < ALERT_MAX_NUDGES) {
+                    alertStallCount = 0;
+                    alertNudgeCount++;
+                    this.logger.info(`Alert stall detected — nudge ${alertNudgeCount}/${ALERT_MAX_NUDGES} for ${sessionName}`);
+                    try {
+                        const nudge = alertNudgeCount === 1
+                            ? 'You stopped before completing the investigation. Continue with the remaining steps and provide your final report including the "## Recommended Action" section.'
+                            : 'Please finish the investigation now. Output your final report with a "## Recommended Action" section summarizing what happened and what to do.';
+                        await this._injectCommand(sessionName, nudge);
+                        baselineOutput = this._captureOutput(sessionName);
+                        lastOutput = baselineOutput;
+                    } catch (err) {
+                        this.logger.error(`Nudge failed for ${sessionName}: ${err.message}`);
+                    }
+                }
+                // Don't enter the stableCount-gated block for stall ticks
+                return;
+            } else {
+                alertStallCount = 0;
+            }
+
             if (stableCount >= (isAlertSession && isFirstResponse ? alertStableThreshold : stableThreshold)) {
-                const lines = currentOutput.trimEnd().split('\n');
-
-                // Check last 10 lines for a bare prompt (❯ or >)
-                // The prompt line may not be last due to Claude CLI status bar
-                const tailLines = lines.slice(-10);
-                const hasPrompt = tailLines.some(l => {
-                    const trimmed = l.trim();
-                    return trimmed === '❯' || trimmed === '>' ||
-                           trimmed.match(/^[>❯]\s*$/) ||
-                           trimmed.includes('│ >') || trimmed.includes('│ ❯');
-                });
-
-                // Only check tail lines for working indicators — old history
-                // in the 200-line tmux buffer would cause false positives.
-                // Case-insensitive: OMC status bar uses lowercase ("thinking")
-                // while Claude Code native UI uses capitalized ("Thinking").
-                // IMPORTANT: Exclude OMC status bar lines (contain "[OMC#") from
-                // isWorking check — the status bar can show stale "thinking" even
-                // when Claude is idle at the prompt, which blocks stall detection.
-                const nonStatusLines = tailLines.filter(l => !l.includes('[OMC#'));
-                const tailText = nonStatusLines.join(' ').toLowerCase();
-                const isWorking =
-                    tailText.includes('clauding') ||
-                    tailText.includes('working') ||
-                    tailText.includes('processing') ||
-                    tailText.includes('⏳') ||
-                    tailText.includes('thinking') ||
-                    tailText.includes('crunching');
-
-                if (attempts % 10 === 0) {
-                    const lastFiveLines = lines.slice(-5).map(l => l.trim()).join(' | ');
-                    this.logger.info(`Poll #${attempts} | stable=${stableCount} hasPrompt=${hasPrompt} isWorking=${isWorking} | last5: ${lastFiveLines}`);
-                }
-
-                if (isAlertSession && isWorking && attempts % 30 === 0) {
-                    this.logger.info(`Alert poll #${attempts} | Claude still working in ${sessionName}`);
-                }
 
                 if (hasPrompt && !isWorking) {
                     // Skip extraction if output hasn't changed since last baseline reset
                     if (baselineOutput === currentOutput) {
-                        // Stall detection: Claude is idle at prompt with no new output.
-                        // If an alert investigation is in progress but incomplete, nudge Claude to continue.
-                        if (isAlertSession && isFirstResponse && alertBuffer && alertNudgeCount < ALERT_MAX_NUDGES) {
-                            alertStallCount++;
-                            if (alertStallCount >= ALERT_STALL_THRESHOLD) {
-                                alertStallCount = 0;
-                                alertNudgeCount++;
-                                this.logger.info(`Alert stall detected for ${sessionName} — sending nudge ${alertNudgeCount}/${ALERT_MAX_NUDGES}`);
-                                try {
-                                    const nudge = alertNudgeCount === 1
-                                        ? 'You stopped before completing the investigation. Continue with the remaining steps and provide your final report including the "## Recommended Action" section.'
-                                        : 'Please finish the investigation now. Output your final report with a "## Recommended Action" section summarizing what happened and what to do.';
-                                    await this._injectCommand(sessionName, nudge);
-                                    // Reset baseline so the poller picks up the new output
-                                    baselineOutput = this._captureOutput(sessionName);
-                                    lastOutput = baselineOutput;
-                                } catch (err) {
-                                    this.logger.error(`Failed to nudge alert session ${sessionName}: ${err.message}`);
-                                }
-                            }
-                        }
                         stableCount = 0;
                         return;
                     }
-
-                    // Reset stall counter when we get new output
-                    alertStallCount = 0;
 
                     const response = this._extractResponse(baselineOutput, currentOutput);
 
@@ -1860,6 +1857,9 @@ ${formatted}`
                     this._autoApprove(sessionName, currentOutput);
                     stableCount = 0;
                 }
+            }
+            } catch (err) {
+                this.logger.error(`Poller error for ${sessionName}: ${err.message}`);
             }
         }, 1000);
 
