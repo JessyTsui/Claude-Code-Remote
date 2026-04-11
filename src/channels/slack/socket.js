@@ -1749,7 +1749,9 @@ ${formatted}`
 
             // Alert stall detection: runs every tick, not gated by stableCount.
             // If Claude is at the prompt and not working, nudge it to continue.
-            if (isAlertSession && isFirstResponse && hasPrompt && !isWorking) {
+            // Grace period: don't nudge until 30s have passed (Claude needs time to load skill + start)
+            const ALERT_NUDGE_GRACE = 30;
+            if (isAlertSession && isFirstResponse && hasPrompt && !isWorking && attempts >= ALERT_NUDGE_GRACE) {
                 alertStallCount++;
                 if (alertStallCount >= ALERT_STALL_THRESHOLD && alertNudgeCount < ALERT_MAX_NUDGES) {
                     alertStallCount = 0;
