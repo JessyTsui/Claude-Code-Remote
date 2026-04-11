@@ -1428,9 +1428,14 @@ ${formatted}`
                 }
             }
 
-            // Response posting is handled by claude-hook-notify.js (Stop hook)
+            // Regular sessions: response posting is handled by claude-hook-notify.js (Stop hook)
             // which reads the transcript for clean markdown output.
-            // No tmux polling needed — the hook fires when Claude completes.
+            // Alert sessions: also start the poller for stall detection + nudge logic.
+            // The hook handles final posting, but the poller nudges Claude if it stalls
+            // mid-investigation (sits at prompt without completing the report).
+            if (session.alertMessageTs) {
+                this._pollForResponse(session, say, sessionKey);
+            }
 
         } catch (error) {
             this.logger.error('Error processing command:', error.message);
@@ -1660,15 +1665,9 @@ ${formatted}`
             if (!this._isTmuxSessionAlive(sessionName)) {
                 clearInterval(interval);
                 this.pollers.delete(pollKey);
-                // Flush accumulated alert buffer before stopping
+                // Don't post here — the Stop hook handles alert posting from the clean transcript.
                 if (alertBuffer) {
-                    this.logger.info(`Flushing alert buffer (${alertBuffer.length} chars) on tmux death for ${sessionName}`);
-                    try {
-                        const sessionStats = this._extractSessionStats(this._captureOutput(sessionName));
-                        await this._sendAlertSummary(say, threadTs, alertBuffer, sessionStats);
-                    } catch (err) {
-                        this.logger.error(`Failed to flush alert buffer on tmux death: ${err.message}`);
-                    }
+                    this.logger.info(`Alert buffer discarded (${alertBuffer.length} chars) on tmux death for ${sessionName} — hook will post`);
                 }
                 this.logger.info(`Poller stopped: tmux session ${sessionName} is dead`);
                 return;
@@ -1682,10 +1681,9 @@ ${formatted}`
                 this.logger.warn(`Poller timeout after ${maxAttempts}s for ${sessionName} (alert=${isAlertSession})`);
                 try {
                     if (alertBuffer) {
-                        this.logger.info(`Flushing alert buffer (${alertBuffer.length} chars) on timeout for ${sessionName}`);
-                        const sessionStats = this._extractSessionStats(this._captureOutput(sessionName));
-                        await this._sendAlertSummary(say, threadTs, alertBuffer, sessionStats);
-                    } else {
+                        // Don't post here — the Stop hook handles alert posting from the clean transcript.
+                        this.logger.info(`Alert buffer discarded (${alertBuffer.length} chars) on timeout for ${sessionName} — hook will post`);
+                    } else if (!isAlertSession) {
                         await say({ text: 'Claude session timed out. Send another message to continue.', thread_ts: threadTs });
                     }
                 } catch (err) {
@@ -1807,32 +1805,13 @@ ${formatted}`
                                 && /(?:^|\n)(?:#{1,3}\s+)?(?:\*\*)?Recommended Action(?:\*\*)?:/im.test(alertBuffer);
 
                             if (hasCompletionMarker || alertAccumulationCount >= 5) {
-                                processing = true;
-                                try {
-                                    const reason = hasCompletionMarker ? 'completion marker found' : `fallback after ${alertAccumulationCount} cycles`;
-                                    this.logger.info(`Alert posting (${reason}): ${alertBuffer.length} chars for ${sessionName}`);
-                                    const sessionStats = this._extractSessionStats(currentOutput);
-                                    await this._sendAlertSummary(say, threadTs, alertBuffer, sessionStats);
-                                    isFirstResponse = false;
-                                    alertBuffer = '';
-                                    alertAccumulationCount = 0;
-                                    this.logger.info(`Alert summary sent to Slack thread ${threadTs} — stopping poller (investigation complete)`);
-
-                                    if (sessionKey) {
-                                        const nowTs = String(Date.now() / 1000);
-                                        this._updateLastBotTs(sessionKey, nowTs);
-                                        this._startSessionTimeout(sessionKey);
-                                    }
-
-                                    // Stop poller — investigation is done. Follow-up @mentions start a fresh poller.
-                                    clearInterval(interval);
-                                    this.pollers.delete(pollKey);
-                                    return;
-                                } catch (err) {
-                                    this.logger.error(`Failed to send alert summary to Slack: ${err.message}`);
-                                } finally {
-                                    processing = false;
-                                }
+                                // Completion detected — stop poller. Posting is handled by
+                                // claude-hook-notify.js (Stop hook) which reads the clean transcript.
+                                const reason = hasCompletionMarker ? 'completion marker found' : `fallback after ${alertAccumulationCount} cycles`;
+                                this.logger.info(`Alert poller done (${reason}): ${alertBuffer.length} chars for ${sessionName} — hook will post`);
+                                clearInterval(interval);
+                                this.pollers.delete(pollKey);
+                                return;
                             } else {
                                 this.logger.info(`Alert accumulating cycle ${alertAccumulationCount} (${alertBuffer.length} chars) for ${sessionName}, waiting for completion marker`);
                             }
