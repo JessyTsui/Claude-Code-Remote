@@ -1733,7 +1733,11 @@ ${formatted}`
                 // in the 200-line tmux buffer would cause false positives.
                 // Case-insensitive: OMC status bar uses lowercase ("thinking")
                 // while Claude Code native UI uses capitalized ("Thinking").
-                const tailText = tailLines.join(' ').toLowerCase();
+                // IMPORTANT: Exclude OMC status bar lines (contain "[OMC#") from
+                // isWorking check — the status bar can show stale "thinking" even
+                // when Claude is idle at the prompt, which blocks stall detection.
+                const nonStatusLines = tailLines.filter(l => !l.includes('[OMC#'));
+                const tailText = nonStatusLines.join(' ').toLowerCase();
                 const isWorking =
                     tailText.includes('clauding') ||
                     tailText.includes('working') ||
