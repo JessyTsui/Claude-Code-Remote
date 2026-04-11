@@ -1635,6 +1635,10 @@ ${formatted}`
         let isFirstResponse = isAlertSession; // only true for the very first response of an alert
         let alertBuffer = '';
         let alertAccumulationCount = 0;
+        let alertStallCount = 0;   // consecutive cycles where Claude is idle with no new output
+        let alertNudgeCount = 0;   // how many nudges we've sent (cap at 2)
+        const ALERT_STALL_THRESHOLD = 3; // stall cycles before nudging (~30s with 8s stable threshold)
+        const ALERT_MAX_NUDGES = 2;
         const alertStableThreshold = 8; // 8s stability for alert first response (vs 3s regular)
 
         if (this.pollers.has(pollKey)) {
@@ -1750,9 +1754,33 @@ ${formatted}`
                 if (hasPrompt && !isWorking) {
                     // Skip extraction if output hasn't changed since last baseline reset
                     if (baselineOutput === currentOutput) {
+                        // Stall detection: Claude is idle at prompt with no new output.
+                        // If an alert investigation is in progress but incomplete, nudge Claude to continue.
+                        if (isAlertSession && isFirstResponse && alertBuffer && alertNudgeCount < ALERT_MAX_NUDGES) {
+                            alertStallCount++;
+                            if (alertStallCount >= ALERT_STALL_THRESHOLD) {
+                                alertStallCount = 0;
+                                alertNudgeCount++;
+                                this.logger.info(`Alert stall detected for ${sessionName} — sending nudge ${alertNudgeCount}/${ALERT_MAX_NUDGES}`);
+                                try {
+                                    const nudge = alertNudgeCount === 1
+                                        ? 'You stopped before completing the investigation. Continue with the remaining steps and provide your final report including the "## Recommended Action" section.'
+                                        : 'Please finish the investigation now. Output your final report with a "## Recommended Action" section summarizing what happened and what to do.';
+                                    await this._injectCommand(sessionName, nudge);
+                                    // Reset baseline so the poller picks up the new output
+                                    baselineOutput = this._captureOutput(sessionName);
+                                    lastOutput = baselineOutput;
+                                } catch (err) {
+                                    this.logger.error(`Failed to nudge alert session ${sessionName}: ${err.message}`);
+                                }
+                            }
+                        }
                         stableCount = 0;
                         return;
                     }
+
+                    // Reset stall counter when we get new output
+                    alertStallCount = 0;
 
                     const response = this._extractResponse(baselineOutput, currentOutput);
 
@@ -1766,7 +1794,13 @@ ${formatted}`
                             alertBuffer += (alertBuffer ? '\n' : '') + response;
                             alertAccumulationCount++;
 
-                            const hasCompletionMarker = alertBuffer.includes('Recommended Action:');
+                            // Use stricter marker detection to avoid matching intermediate narration
+                            // (e.g. "Recommended Action: Investigation directory created...").
+                            // Real reports use markdown headings (## Recommended Action) or bold (**Recommended Action:**)
+                            // and are substantially longer than one-line status messages.
+                            const MIN_ALERT_BUFFER_LEN = 500;
+                            const hasCompletionMarker = alertBuffer.length >= MIN_ALERT_BUFFER_LEN
+                                && /(?:^|\n)(?:#{1,3}\s+)?(?:\*\*)?Recommended Action(?:\*\*)?:/im.test(alertBuffer);
 
                             if (hasCompletionMarker || alertAccumulationCount >= 5) {
                                 processing = true;
