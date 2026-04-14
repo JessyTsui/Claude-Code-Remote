@@ -1766,11 +1766,18 @@ ${formatted}`
                        trimmed.includes('│ >') || trimmed.includes('│ ❯');
             });
 
+            // Use a wider window (30 lines) for working detection — Claude Code's
+            // working status (e.g. "✽ Burrowing… (54s · ↓ 331 tokens)") can be
+            // pushed far above the bottom by separators, prompt, OMC status bar,
+            // and queued-message chrome. 10 lines missed it routinely.
+            const wideLines = lines.slice(-30);
             // Exclude OMC status bar lines (contain "[OMC#") from isWorking check —
             // the status bar can show stale "thinking" even when Claude is idle.
-            const nonStatusLines = tailLines.filter(l => !l.includes('[OMC#'));
+            const nonStatusLines = wideLines.filter(l => !l.includes('[OMC#'));
             const tailText = nonStatusLines.join(' ').toLowerCase();
-            // Keep in sync with workingIndicators in _injectCommand
+            // Keyword check — keep in sync with workingIndicators in _injectCommand.
+            // Claude Code uses many random verbs (Burrowing, Metamorphosing, etc.)
+            // so also match its timer pattern "(Ns · ↓" which always appears.
             const isWorking =
                 tailText.includes('clauding') ||
                 tailText.includes('working') ||
@@ -1781,8 +1788,10 @@ ${formatted}`
                 tailText.includes('brewing') ||
                 tailText.includes('metamorphosing') ||
                 tailText.includes('flibbertigibbeting') ||
+                tailText.includes('burrowing') ||
                 tailText.includes('esc to interrupt') ||
-                tailText.includes('running');
+                tailText.includes('running…') ||
+                /\(\d+[sm]\d*s?\s+·\s+↓/.test(tailText);
 
             if (attempts % 10 === 0) {
                 const lastFiveLines = lines.slice(-5).map(l => l.trim()).join(' | ');
