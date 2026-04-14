@@ -115,6 +115,22 @@ class SlackSocketHandler {
         }
         this.db.exec('CREATE INDEX IF NOT EXISTS idx_claude_session_id ON sessions(claude_session_id)');
 
+        // Alert investigation queue — process alerts sequentially to avoid resource contention
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS alert_queue (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                incident_id TEXT,
+                channel_id  TEXT NOT NULL,
+                message_ts  TEXT NOT NULL,
+                prompt      TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'pending',
+                alert_type  TEXT NOT NULL DEFAULT 'pagerduty',
+                created_at  INTEGER NOT NULL,
+                updated_at  INTEGER NOT NULL
+            )
+        `);
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_alert_queue_status ON alert_queue(status)');
+
         this._stmts = {
             upsert: this.db.prepare(`
                 INSERT INTO sessions (session_key, session_name, channel_id, thread_ts, repo_path, created_at, updated_at, alert_message_ts)
@@ -133,6 +149,22 @@ class SlackSocketHandler {
             deleteByNameExcept: this.db.prepare('DELETE FROM sessions WHERE session_name = ? AND session_key != ?'),
             getByClaudeSessionId: this.db.prepare('SELECT * FROM sessions WHERE claude_session_id = ? LIMIT 1'),
             updateClaudeSessionId: this.db.prepare('UPDATE sessions SET claude_session_id = ?, updated_at = ? WHERE session_key = ?')
+        };
+
+        this._queueStmts = {
+            enqueue: this.db.prepare(`
+                INSERT INTO alert_queue (incident_id, channel_id, message_ts, prompt, status, alert_type, created_at, updated_at)
+                VALUES (@incident_id, @channel_id, @message_ts, @prompt, 'pending', @alert_type, @created_at, @updated_at)
+            `),
+            dequeue: this.db.prepare("SELECT * FROM alert_queue WHERE status = 'pending' ORDER BY created_at ASC LIMIT 1"),
+            countPending: this.db.prepare("SELECT COUNT(*) as count FROM alert_queue WHERE status = 'pending'"),
+            countProcessing: this.db.prepare("SELECT COUNT(*) as count FROM alert_queue WHERE status = 'processing'"),
+            getProcessing: this.db.prepare("SELECT * FROM alert_queue WHERE status = 'processing'"),
+            getByMessage: this.db.prepare("SELECT * FROM alert_queue WHERE channel_id = ? AND message_ts = ? AND status IN ('pending', 'processing') LIMIT 1"),
+            updateStatus: this.db.prepare('UPDATE alert_queue SET status = ?, updated_at = ? WHERE id = ?'),
+            complete: this.db.prepare("UPDATE alert_queue SET status = 'completed', updated_at = ? WHERE channel_id = ? AND message_ts = ? AND status = 'processing'"),
+            cleanOld: this.db.prepare("DELETE FROM alert_queue WHERE status IN ('completed', 'failed') AND updated_at < ?"),
+            all: this.db.prepare('SELECT * FROM alert_queue ORDER BY created_at DESC LIMIT 50'),
         };
 
         // Clean up sessions older than 7 days
@@ -203,6 +235,106 @@ class SlackSocketHandler {
         this._stmts.touch.run(Date.now(), sessionKey);
     }
 
+    // ─── Alert Queue ─────────────────────────────────────────────────
+
+    _enqueueAlert({ incidentId, channelId, messageTs, prompt, alertType = 'pagerduty' }) {
+        // Dedup: skip if already queued for this message
+        const existing = this._queueStmts.getByMessage.get(channelId, messageTs);
+        if (existing) {
+            this.logger.info(`Alert already queued (status=${existing.status}): channel=${channelId} ts=${messageTs}`);
+            return 0;
+        }
+
+        const now = Date.now();
+        this._queueStmts.enqueue.run({
+            incident_id: incidentId || null,
+            channel_id: channelId,
+            message_ts: messageTs,
+            prompt,
+            alert_type: alertType,
+            created_at: now,
+            updated_at: now
+        });
+        const position = this._queueStmts.countPending.get().count;
+        this.logger.info(`Alert queued: incident=${incidentId} type=${alertType} channel=${channelId} ts=${messageTs} position=${position}`);
+        return position;
+    }
+
+    _processNextInQueue() {
+        const maxConcurrent = this.config.alertMaxConcurrent || 1;
+        const active = this._queueStmts.countProcessing.get().count;
+
+        if (active >= maxConcurrent) {
+            const pending = this._queueStmts.countPending.get().count;
+            if (pending > 0) {
+                this.logger.info(`Alert queue: ${active}/${maxConcurrent} slots busy, ${pending} pending`);
+            }
+            return;
+        }
+
+        const item = this._queueStmts.dequeue.get();
+        if (!item) {
+            return;
+        }
+
+        // Mark as processing
+        this._queueStmts.updateStatus.run('processing', Date.now(), item.id);
+        this.logger.info(`Alert queue: processing id=${item.id} incident=${item.incident_id} channel=${item.channel_id} ts=${item.message_ts}`);
+
+        // Swap hourglass → eyes for items that waited in the queue
+        const waitedMs = Date.now() - item.created_at;
+        if (waitedMs > 5000) {
+            this._removeReaction(item.channel_id, item.message_ts, 'hourglass_flowing_sand').catch(() => {});
+            this._addReaction(item.channel_id, item.message_ts, 'eyes').catch(() => {});
+            this.app.client.chat.postMessage({
+                channel: item.channel_id,
+                text: `:mag: Starting investigation (waited ${Math.round(waitedMs / 1000)}s in queue)...`,
+                thread_ts: item.message_ts
+            }).catch(err => this.logger.error(`Failed to post queue start notice: ${err.message}`));
+        }
+
+        // Fire the investigation via the regular command flow
+        this._processCommand(item.channel_id, item.message_ts, item.prompt, null, item.message_ts, item.message_ts)
+            .catch(err => {
+                this.logger.error(`Alert queue: failed to start investigation for id=${item.id}: ${err.message}`);
+                this._queueStmts.updateStatus.run('failed', Date.now(), item.id);
+                // Try next
+                setImmediate(() => this._processNextInQueue());
+            });
+    }
+
+    _completeQueueItem(channelId, messageTs) {
+        const result = this._queueStmts.complete.run(Date.now(), channelId, messageTs);
+        if (result.changes > 0) {
+            this.logger.info(`Alert queue: completed item channel=${channelId} ts=${messageTs}`);
+        }
+        // Process next in queue after current slot frees up
+        setImmediate(() => this._processNextInQueue());
+    }
+
+    _recoverQueue() {
+        // Reset stale 'processing' items that don't have active tmux sessions
+        const processing = this._queueStmts.getProcessing.all();
+        let recovered = 0;
+        for (const item of processing) {
+            const sessionKey = `${item.channel_id}-${item.message_ts}`;
+            const session = this._getSession(sessionKey);
+            if (!session || !this._isTmuxSessionAlive(session.sessionName)) {
+                this._queueStmts.updateStatus.run('pending', Date.now(), item.id);
+                recovered++;
+                this.logger.info(`Alert queue: recovered stale item id=${item.id} incident=${item.incident_id}`);
+            }
+        }
+        // Clean up old completed/failed items (older than 24h)
+        const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+        this._queueStmts.cleanOld.run(dayAgo);
+
+        const pending = this._queueStmts.countPending.get().count;
+        if (recovered > 0 || pending > 0) {
+            this.logger.info(`Alert queue recovery: ${recovered} reset to pending, ${pending} total pending`);
+        }
+    }
+
     /**
      * On startup, check which DB sessions still have a live tmux session.
      * Remove dead ones.
@@ -232,6 +364,10 @@ class SlackSocketHandler {
         }
 
         this.logger.info(`Session reconciliation: ${alive} alive, ${removed} stale removed`);
+
+        // Recover alert queue — reset stale 'processing' items, then start processing
+        this._recoverQueue();
+        this._processNextInQueue();
 
         // Kill orphan tmux sessions not tracked in DB
         try {
@@ -1057,9 +1193,6 @@ ${formatted}`
             }
         }
 
-        // React with eyes
-        await this._addReaction(channelId, messageTs, 'eyes');
-
         // Download attached images
         const imagePaths = await this._downloadSlackImages(event.files, `alert-${messageTs.replace('.', '')}`);
         const imageInstruction = imagePaths.length > 0
@@ -1080,8 +1213,19 @@ ${formatted}`
             prompt = `Investigate this PagerDuty alert: ${text.substring(0, 500)}${imageInstruction}`;
         }
 
-        // Use the regular command flow — messageTs as threadTs (replies go in alert thread)
-        await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
+        // Enqueue for sequential processing — prevents resource contention from concurrent sessions
+        const position = this._enqueueAlert({ incidentId, channelId, messageTs, prompt, alertType: 'pagerduty' });
+        if (position > 1) {
+            // Queued — react with hourglass (swapped to eyes when dequeued)
+            await this._addReaction(channelId, messageTs, 'hourglass_flowing_sand');
+            await this.app.client.chat.postMessage({
+                channel: channelId, text: `\u23f3 Queued for investigation (position ${position})`, thread_ts: messageTs
+            }).catch(() => {});
+        } else {
+            // Starting immediately
+            await this._addReaction(channelId, messageTs, 'eyes');
+        }
+        this._processNextInQueue();
     }
 
     async _handleDelayAlertMessage(event) {
@@ -1707,6 +1851,7 @@ ${formatted}`
                 if (isAlertSession && session.alertMessageTs) {
                     await this._removeReaction(session.channelId, session.alertMessageTs, 'eyes').catch(() => {});
                     await this._addReaction(session.channelId, session.alertMessageTs, 'white_check_mark').catch(() => {});
+                    this._completeQueueItem(session.channelId, session.alertMessageTs);
                 }
                 this.logger.info(`Poller stopped: tmux session ${sessionName} is dead`);
                 return;
@@ -1739,6 +1884,7 @@ ${formatted}`
                     if (sess?.alertMessageTs) {
                         await this._removeReaction(sess.channelId, sess.alertMessageTs, 'eyes').catch(() => {});
                         await this._addReaction(sess.channelId, sess.alertMessageTs, 'white_check_mark').catch(() => {});
+                        this._completeQueueItem(sess.channelId, sess.alertMessageTs);
                     }
                 }
                 return;
@@ -1824,6 +1970,7 @@ ${formatted}`
                             isFirstResponse = false;
                             clearInterval(interval);
                             this.pollers.delete(pollKey);
+                            this._completeQueueItem(session.channelId, session.alertMessageTs);
                             return;
                         }
                     } catch (err) {
@@ -1892,6 +2039,7 @@ ${formatted}`
                             this.logger.warn(`Alert escalation: max retries (${ALERT_MAX_RETRIES}) reached for ${sessionName} — killing tmux so hook posts incomplete notice`);
                             this.alertRetries.delete(sessionKey);
                             this.alertCommands.delete(sessionKey);
+                            this._completeQueueItem(session.channelId, session.alertMessageTs);
                         }
                         return;
                     }
@@ -2039,6 +2187,7 @@ ${formatted}`
                     // Alert session: swap reactions
                     await this._removeReaction(session.channelId, session.alertMessageTs, 'eyes');
                     await this._addReaction(session.channelId, session.alertMessageTs, 'white_check_mark');
+                    this._completeQueueItem(session.channelId, session.alertMessageTs);
                 }
 
                 if (!session.alertMessageTs || isAlertWithUserChat) {
@@ -2735,7 +2884,7 @@ ${formatted}`
                     prompt = `Investigate this alert: ${text.substring(0, 500)}${imageInstruction}`;
                 }
 
-                // Use the regular command flow
+                // Manual trigger — bypass queue, process immediately
                 await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
                 res.json({ status: 'investigating', channelId, messageTs });
             } catch (error) {
@@ -2827,6 +2976,27 @@ ${formatted}`
                 this.logger.error(`Trigger delay alert error: ${error.message}`);
                 res.status(500).json({ error: error.message });
             }
+        });
+
+        httpApp.get('/queue', (req, res) => {
+            const items = this._queueStmts.all.all();
+            const pending = items.filter(i => i.status === 'pending').length;
+            const processing = items.filter(i => i.status === 'processing').length;
+            res.json({
+                maxConcurrent: this.config.alertMaxConcurrent || 1,
+                pending,
+                processing,
+                items: items.map(i => ({
+                    id: i.id,
+                    incident_id: i.incident_id,
+                    channel_id: i.channel_id,
+                    message_ts: i.message_ts,
+                    status: i.status,
+                    alert_type: i.alert_type,
+                    created_at: new Date(i.created_at).toISOString(),
+                    updated_at: new Date(i.updated_at).toISOString(),
+                }))
+            });
         });
 
         httpApp.get('/delay-counters', (req, res) => {
@@ -3016,10 +3186,9 @@ ${formatted}`
                     prompt = `Investigate this PagerDuty alert: ${(permalink || text).substring(0, 500)}${imageInstruction}`;
                 }
 
-                await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
-                this.logger.info(`PD webhook: investigation started for ${incidentId}`);
+                this.logger.info(`PD webhook: notifying owner for ${incidentId} (Socket Mode handles investigation via queue)`);
 
-                // Notify owner that webhook triggered a new investigation
+                // Notify owner — Socket Mode path handles the actual investigation queue
                 this._notifyOwnerIncidentWebhook(incidentId, event.data, { permalink }).catch(err =>
                     this.logger.error(`Failed to notify owner of incident webhook: ${err.message}`)
                 );

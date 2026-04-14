@@ -36,6 +36,7 @@ const config = {
     alertSkill: process.env.ALERT_SKILL || '',
     sessionInactivityTimeoutMs: parseInt(process.env.SESSION_INACTIVITY_TIMEOUT_MS) || 300000,
     pollerTimeoutMs: parseInt(process.env.POLLER_TIMEOUT_MS) || 1800000, // 30 min
+    alertMaxConcurrent: parseInt(process.env.ALERT_MAX_CONCURRENT) || 1,
     pagerdutyApiToken: process.env.PAGERDUTY_API_TOKEN || '',
     pagerdutyFromEmail: process.env.PAGERDUTY_FROM_EMAIL || '',
     pagerdutyWebhookSecret: process.env.PAGERDUTY_WEBHOOK_SECRET || '',
@@ -164,6 +165,7 @@ async function start() {
     logger.info(`- HTTP Port: ${config.httpPort}`);
     logger.info(`- Monitor Channels: ${config.monitorChannels || 'None'}`);
     logger.info(`- Alert Skill: ${config.alertSkill || 'None'}`);
+    logger.info(`- Alert Max Concurrent: ${config.alertMaxConcurrent}`);
     logger.info(`- PagerDuty: ${config.pagerdutyApiToken ? 'Configured' : 'Not configured'}`);
     logger.info(`- Session Inactivity Timeout: ${config.sessionInactivityTimeoutMs}ms`);
     logger.info(`- Poller Timeout: ${config.pollerTimeoutMs}ms`);
