@@ -1673,7 +1673,7 @@ ${formatted}`
         let alertStallCount = 0;   // consecutive cycles where Claude is idle with no new output
         let alertNudgeCount = 0;   // how many nudges we've sent (cap at 2)
         let postNudgeStallCount = 0; // ticks Claude remained idle after nudges were exhausted
-        const ALERT_STALL_THRESHOLD = 3; // stall cycles before nudging (~30s with 8s stable threshold)
+        const ALERT_STALL_THRESHOLD = 15; // consecutive idle ticks (~15s) before nudging — low values false-trigger during brief keyword gaps
         const ALERT_MAX_NUDGES = 2;
         const ALERT_POST_NUDGE_WAIT = 60; // seconds to wait after final nudge before escalating (kill + retry)
         const ALERT_MAX_RETRIES = 1;      // retry the investigation once if nudges fail
@@ -1770,13 +1770,19 @@ ${formatted}`
             // the status bar can show stale "thinking" even when Claude is idle.
             const nonStatusLines = tailLines.filter(l => !l.includes('[OMC#'));
             const tailText = nonStatusLines.join(' ').toLowerCase();
+            // Keep in sync with workingIndicators in _injectCommand
             const isWorking =
                 tailText.includes('clauding') ||
                 tailText.includes('working') ||
                 tailText.includes('processing') ||
                 tailText.includes('⏳') ||
                 tailText.includes('thinking') ||
-                tailText.includes('crunching');
+                tailText.includes('crunching') ||
+                tailText.includes('brewing') ||
+                tailText.includes('metamorphosing') ||
+                tailText.includes('flibbertigibbeting') ||
+                tailText.includes('esc to interrupt') ||
+                tailText.includes('running');
 
             if (attempts % 10 === 0) {
                 const lastFiveLines = lines.slice(-5).map(l => l.trim()).join(' | ');
