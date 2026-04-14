@@ -301,6 +301,7 @@ async function sendHookNotification() {
     let alertMessageTs = null;
     let lastUserId = null;
     let rootSessionId = null;
+    let sessionName = null;
 
     try {
         const Database = require('better-sqlite3');
@@ -342,6 +343,7 @@ async function sendHookNotification() {
                 alertMessageTs = row.alert_message_ts || null;
                 lastUserId = row.last_user_id || null;
                 rootSessionId = row.claude_session_id || null;
+                sessionName = row.session_name || null;
             }
         }
     } catch (error) {
@@ -430,6 +432,8 @@ async function sendHookNotification() {
                     }
 
                     if (hasValidReport) {
+                        // Clean up retry file on success
+                        try { fs.unlinkSync(`/tmp/hook-retry-${slackSessionKey}`); } catch { /* ignore */ }
                         // Post summary + upload full report
                         const match = assistantMessage.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*)/i);
                         const summary = match ? match[1].trim() : (
@@ -464,15 +468,51 @@ async function sendHookNotification() {
                             initial_comment: '_Full investigation details attached._',
                         });
                     } else {
-                        // No valid report — Claude likely hung or exited before completing investigation
-                        console.log(`No valid alert report found (assistantMessage: ${(assistantMessage || '').length} chars) — posting incomplete notice`);
+                        // No valid report — Claude likely stalled mid-investigation.
+                        // If tmux is alive, nudge Claude to continue (up to MAX_HOOK_RETRIES).
+                        const HOOK_MAX_RETRIES = 2;
+                        const retryFile = `/tmp/hook-retry-${slackSessionKey}`;
+                        let retryCount = 0;
+                        try { retryCount = parseInt(fs.readFileSync(retryFile, 'utf-8').trim(), 10) || 0; } catch { /* first attempt */ }
+
+                        let tmuxAlive = false;
+                        if (sessionName) {
+                            try {
+                                execSync(`tmux has-session -t ${sessionName} 2>/dev/null`);
+                                tmuxAlive = true;
+                            } catch { /* session dead */ }
+                        }
+
+                        if (tmuxAlive && retryCount < HOOK_MAX_RETRIES) {
+                            retryCount++;
+                            fs.writeFileSync(retryFile, String(retryCount));
+                            console.log(`Alert incomplete (attempt ${retryCount}/${HOOK_MAX_RETRIES}) — nudging Claude in tmux ${sessionName}`);
+                            const nudge = 'Please continue the investigation. Output your final report with a "## Recommended Action" section summarizing what happened and what to do.';
+                            try {
+                                // Write nudge to temp file and paste into tmux (avoids shell escaping issues)
+                                const nudgeTmp = `/tmp/hook-nudge-${Date.now()}.txt`;
+                                fs.writeFileSync(nudgeTmp, nudge);
+                                execSync(`tmux load-buffer ${nudgeTmp} && tmux paste-buffer -t ${sessionName}`);
+                                // Small delay then send Enter to submit
+                                execSync(`sleep 0.3 && tmux send-keys -t ${sessionName} Enter`);
+                                fs.unlinkSync(nudgeTmp);
+                            } catch (err) {
+                                console.error(`Failed to nudge Claude in tmux: ${err.message}`);
+                            }
+                            // Don't post "incomplete" — wait for next Stop hook
+                            process.exit(0);
+                        }
+
+                        // Retries exhausted or tmux dead — post incomplete notice
+                        try { fs.unlinkSync(retryFile); } catch { /* ignore */ }
+                        console.log(`No valid alert report found after ${retryCount} retries (assistantMessage: ${(assistantMessage || '').length} chars) — posting incomplete notice`);
                         await web.chat.postMessage({
                             channel: channelId,
                             text: ':warning: Investigation incomplete — Claude exited before producing a report.',
                             thread_ts: threadTs,
                         });
 
-                        // Upload raw Claude output so owner can debug what happened (tmux is gone by now)
+                        // Upload raw Claude output so owner can debug what happened
                         if (assistantMessage) {
                             try {
                                 await web.filesUploadV2({
