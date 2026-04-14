@@ -25,8 +25,6 @@ class SlackSocketHandler {
         // Polling state per session (in-memory only, rebuilt on start)
         this.pollers = new Map();
         this.sessionTimers = new Map(); // sessionKey -> setTimeout handle
-        this.alertRetries = new Map();  // sessionKey -> retry count (for escalation after nudges)
-        this.alertCommands = new Map(); // sessionKey -> original alert prompt (for retry)
 
         this.app = new App({
             token: config.botToken,
@@ -225,10 +223,6 @@ class SlackSocketHandler {
 
     _deleteSession(sessionKey) {
         this._stmts.delete.run(sessionKey);
-        // Clear alert retry/command state — new alerts on the same thread start fresh.
-        // For mid-retry deletions (escalation path), the caller manages these maps explicitly.
-        this.alertRetries.delete(sessionKey);
-        this.alertCommands.delete(sessionKey);
     }
 
     _touchSession(sessionKey) {
@@ -1584,15 +1578,9 @@ ${formatted}`
 
             // Regular sessions: response posting is handled by claude-hook-notify.js (Stop hook)
             // which reads the transcript for clean markdown output.
-            // Alert sessions: also start the poller for stall detection + nudge logic.
-            // The hook handles final posting, but the poller nudges Claude if it stalls
-            // mid-investigation (sits at prompt without completing the report).
+            // Alert sessions: start the poller to swap reactions (👀→✅) when Claude finishes.
+            // The hook handles final posting — no stall detection needed.
             if (session.alertMessageTs) {
-                // Preserve original alert prompt so the poller can retry if nudges fail.
-                // Only set on first attempt — retries reuse the original.
-                if (!this.alertCommands.has(sessionKey)) {
-                    this.alertCommands.set(sessionKey, fullCommand);
-                }
                 this.logger.info(`Starting alert poller for ${session.sessionName} (alertMessageTs=${session.alertMessageTs})`);
                 this._pollForResponse(session, say, sessionKey);
             }
@@ -1818,13 +1806,6 @@ ${formatted}`
         let isFirstResponse = isAlertSession; // only true for the very first response of an alert
         let alertBuffer = '';
         let alertAccumulationCount = 0;
-        let alertStallCount = 0;   // consecutive cycles where Claude is idle with no new output
-        let alertNudgeCount = 0;   // how many nudges we've sent (cap at 2)
-        let postNudgeStallCount = 0; // ticks Claude remained idle after nudges were exhausted
-        const ALERT_STALL_THRESHOLD = 15; // consecutive idle ticks (~15s) before nudging — low values false-trigger during brief keyword gaps
-        const ALERT_MAX_NUDGES = 2;
-        const ALERT_POST_NUDGE_WAIT = 60; // seconds to wait after final nudge before escalating (kill + retry)
-        const ALERT_MAX_RETRIES = 1;      // retry the investigation once if nudges fail
         const alertStableThreshold = 8; // 8s stability for alert first response (vs 3s regular)
 
         if (this.pollers.has(pollKey)) {
@@ -1946,113 +1927,6 @@ ${formatted}`
             if (attempts % 10 === 0) {
                 const lastFiveLines = lines.slice(-5).map(l => l.trim()).join(' | ');
                 this.logger.info(`Poll #${attempts} | stable=${stableCount} prompt=${hasPrompt} working=${isWorking} | ${lastFiveLines.substring(0, 120)}`);
-            }
-
-            // Alert stall detection: runs every tick, not gated by stableCount.
-            // If Claude is at the prompt and not working, nudge it to continue.
-            // Also detect "Press up to edit queued messages" — Claude accepted the
-            // input but is stuck in a queued-message state, not making progress.
-            // Grace period: don't nudge until 30s have passed (Claude needs time to load skill + start)
-            const ALERT_NUDGE_GRACE = 30;
-            const isQueuedMsgStuck = tailText.includes('press up to edit queued messages');
-            const isAlertStalled = (hasPrompt && !isWorking) || isQueuedMsgStuck;
-            if (isAlertSession && isFirstResponse && isAlertStalled && attempts >= ALERT_NUDGE_GRACE) {
-                // Before nudging/escalating, check if the Stop hook already posted the report.
-                // Check on first stall tick and before escalation to limit API calls.
-                if (alertStallCount === 0 || (alertNudgeCount >= ALERT_MAX_NUDGES && postNudgeStallCount === ALERT_POST_NUDGE_WAIT - 1)) {
-                    try {
-                        const replies = await this.app.client.conversations.replies({
-                            channel: session.channelId,
-                            ts: threadTs,
-                            limit: 20
-                        });
-                        const reportPosted = (replies.messages || []).some(m =>
-                            m.ts !== threadTs && m.text?.includes('Recommended Action:')
-                        );
-                        if (reportPosted) {
-                            this.logger.info(`Alert report already posted by hook — stopping poller for ${sessionName}`);
-                            isFirstResponse = false;
-                            clearInterval(interval);
-                            this.pollers.delete(pollKey);
-                            this._completeQueueItem(session.channelId, session.alertMessageTs);
-                            return;
-                        }
-                    } catch (err) {
-                        this.logger.warn(`Thread check failed during stall detection: ${err.message}`);
-                    }
-                }
-                alertStallCount++;
-                if (alertStallCount >= ALERT_STALL_THRESHOLD && alertNudgeCount < ALERT_MAX_NUDGES) {
-                    alertStallCount = 0;
-                    alertNudgeCount++;
-                    this.logger.info(`Alert stall detected — nudge ${alertNudgeCount}/${ALERT_MAX_NUDGES} for ${sessionName}`);
-                    try {
-                        // First nudge: re-inject the original command — the initial
-                        // injection may have been silently lost (tcsetattr race).
-                        // Second nudge: ask Claude to wrap up.
-                        const alertCommand = this.alertCommands.get(sessionKey);
-                        const nudge = alertNudgeCount === 1 && alertCommand
-                            ? alertCommand
-                            : 'Please finish the investigation now. Output your final report with a "## Recommended Action" section summarizing what happened and what to do.';
-                        if (alertNudgeCount === 1 && alertCommand) {
-                            this.logger.info(`Re-injecting original alert command for ${sessionName} (paste may have been lost)`);
-                        }
-                        await this._injectCommand(sessionName, nudge);
-                        baselineOutput = this._captureOutput(sessionName);
-                        lastOutput = baselineOutput;
-                    } catch (err) {
-                        this.logger.error(`Nudge failed for ${sessionName}: ${err.message}`);
-                    }
-                } else if (alertNudgeCount >= ALERT_MAX_NUDGES) {
-                    // Nudges exhausted — wait, then escalate (kill + retry once, or give up)
-                    postNudgeStallCount++;
-                    if (postNudgeStallCount >= ALERT_POST_NUDGE_WAIT) {
-                        const retryCount = this.alertRetries.get(sessionKey) || 0;
-                        const alertCommand = this.alertCommands.get(sessionKey);
-                        clearInterval(interval);
-                        this.pollers.delete(pollKey);
-                        try {
-                            execSync(`tmux kill-session -t ${sessionName} 2>/dev/null`);
-                        } catch { /* already dead */ }
-
-                        if (retryCount < ALERT_MAX_RETRIES && alertCommand) {
-                            this.logger.warn(`Alert escalation: nudges exhausted, retrying (${retryCount + 1}/${ALERT_MAX_RETRIES}) for ${sessionName}`);
-                            this._deleteSession(sessionKey);
-                            // Re-seed retry count + command AFTER _deleteSession (which clears them)
-                            // so the next attempt's poller sees the incremented counter and won't loop.
-                            this.alertRetries.set(sessionKey, retryCount + 1);
-                            this.alertCommands.set(sessionKey, alertCommand);
-                            try {
-                                await say({ text: ':arrows_counterclockwise: First attempt stalled — retrying investigation with a fresh session...', thread_ts: threadTs });
-                            } catch (err) {
-                                this.logger.error(`Failed to post retry notice: ${err.message}`);
-                            }
-                            // Fire-and-forget retry; new _processCommand will create a fresh tmux + poller
-                            setImmediate(() => {
-                                this._processCommand(
-                                    session.channelId,
-                                    threadTs,
-                                    alertCommand,
-                                    say,
-                                    session.alertMessageTs,
-                                    session.alertMessageTs
-                                ).catch(err => this.logger.error(`Alert retry failed: ${err.message}`));
-                            });
-                        } else {
-                            // Max retries exhausted — let tmux death trigger the hook to post "incomplete"
-                            this.logger.warn(`Alert escalation: max retries (${ALERT_MAX_RETRIES}) reached for ${sessionName} — killing tmux so hook posts incomplete notice`);
-                            this.alertRetries.delete(sessionKey);
-                            this.alertCommands.delete(sessionKey);
-                            this._completeQueueItem(session.channelId, session.alertMessageTs);
-                        }
-                        return;
-                    }
-                }
-                // Don't enter the stableCount-gated block for stall ticks
-                return;
-            } else {
-                alertStallCount = 0;
-                postNudgeStallCount = 0;
             }
 
             if (stableCount >= (isAlertSession && isFirstResponse ? alertStableThreshold : stableThreshold)) {
