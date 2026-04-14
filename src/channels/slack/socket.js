@@ -1543,6 +1543,9 @@ ${formatted}`
             // Write command to temp file to avoid shell argument length limits
             fs.writeFileSync(tmpFile, command);
 
+            // Snapshot output before injection so we can detect silent paste loss later.
+            const preInjectOutput = this._captureOutput(sessionName);
+
             // Paste with verification — Claude Code renders ❯ before its TUI input handler
             // finishes initializing. If we paste during that window, tcsetattr(TCSAFLUSH)
             // flushes the pty buffer and our paste is silently lost. Retry until it lands.
@@ -1613,6 +1616,20 @@ ${formatted}`
                     // Prompt visible after at least 2 Enter attempts — Claude likely processed
                     // the command quickly and is waiting for the next one. The Stop hook
                     // already fired (or will fire), so don't keep retrying.
+                    // Guard: if output is essentially unchanged from before injection, the
+                    // paste was silently lost (tcsetattr TCSAFLUSH race). Keep retrying.
+                    const trimmedPre = preInjectOutput.replace(/\s+/g, ' ').trim();
+                    const trimmedNow = output.replace(/\s+/g, ' ').trim();
+                    if (trimmedPre === trimmedNow) {
+                        this.logger.warn(`Output unchanged after Enter attempt ${attempt + 1} — paste likely lost, re-pasting for ${sessionName}`);
+                        // Re-paste the command before next Enter attempt
+                        execSync(`tmux send-keys -t ${sessionName} C-u`);
+                        await new Promise(r => setTimeout(r, 200));
+                        execSync(`tmux load-buffer ${tmpFile}`);
+                        execSync(`tmux paste-buffer -t ${sessionName}`);
+                        await new Promise(r => setTimeout(r, 1500));
+                        continue;
+                    }
                     this.logger.info(`Prompt visible after Enter attempt ${attempt + 1} — Claude likely already responded for ${sessionName}`);
                     return;
                 }
@@ -1768,9 +1785,13 @@ ${formatted}`
 
             // Alert stall detection: runs every tick, not gated by stableCount.
             // If Claude is at the prompt and not working, nudge it to continue.
+            // Also detect "Press up to edit queued messages" — Claude accepted the
+            // input but is stuck in a queued-message state, not making progress.
             // Grace period: don't nudge until 30s have passed (Claude needs time to load skill + start)
             const ALERT_NUDGE_GRACE = 30;
-            if (isAlertSession && isFirstResponse && hasPrompt && !isWorking && attempts >= ALERT_NUDGE_GRACE) {
+            const isQueuedMsgStuck = tailText.includes('press up to edit queued messages');
+            const isAlertStalled = (hasPrompt && !isWorking) || isQueuedMsgStuck;
+            if (isAlertSession && isFirstResponse && isAlertStalled && attempts >= ALERT_NUDGE_GRACE) {
                 // Before nudging/escalating, check if the Stop hook already posted the report.
                 // Check on first stall tick and before escalation to limit API calls.
                 if (alertStallCount === 0 || (alertNudgeCount >= ALERT_MAX_NUDGES && postNudgeStallCount === ALERT_POST_NUDGE_WAIT - 1)) {
@@ -1800,9 +1821,16 @@ ${formatted}`
                     alertNudgeCount++;
                     this.logger.info(`Alert stall detected — nudge ${alertNudgeCount}/${ALERT_MAX_NUDGES} for ${sessionName}`);
                     try {
-                        const nudge = alertNudgeCount === 1
-                            ? 'You stopped before completing the investigation. Continue with the remaining steps and provide your final report including the "## Recommended Action" section.'
+                        // First nudge: re-inject the original command — the initial
+                        // injection may have been silently lost (tcsetattr race).
+                        // Second nudge: ask Claude to wrap up.
+                        const alertCommand = this.alertCommands.get(sessionKey);
+                        const nudge = alertNudgeCount === 1 && alertCommand
+                            ? alertCommand
                             : 'Please finish the investigation now. Output your final report with a "## Recommended Action" section summarizing what happened and what to do.';
+                        if (alertNudgeCount === 1 && alertCommand) {
+                            this.logger.info(`Re-injecting original alert command for ${sessionName} (paste may have been lost)`);
+                        }
                         await this._injectCommand(sessionName, nudge);
                         baselineOutput = this._captureOutput(sessionName);
                         lastOutput = baselineOutput;
