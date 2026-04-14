@@ -8,7 +8,8 @@
     "hooks:install": "node hooks-manage.js install",
     "hooks:uninstall": "node hooks-manage.js uninstall",
     "hooks:status": "node hooks-manage.js status",
-    "slack": "node start-slack-socket.js"
+    "slack": "node start-slack-socket.js",
+    "test": "jest --verbose"
   },
   "keywords": [
     "claude-code",
@@ -48,5 +49,8 @@
     "swagger-ui-express": "^5.0.1",
     "utf-8-validate": "^6.0.6",
     "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "jest": "^30.3.0"
   }
 }

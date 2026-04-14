@@ -1183,11 +1183,12 @@ ${formatted}`
 
         if (incidentId) this.trackedIncidents.set(incidentId, { channelId, messageTs });
 
-        // PD acknowledge
+        // PD acknowledge — only skip if resolved (no point investigating).
+        // "acknowledged" is normal: the webhook ACKs PD before Socket Mode fires.
         if (incidentId && this.config.pagerdutyApiToken) {
             const pdResult = await this._acknowledgePagerDuty(incidentId);
-            if (pdResult?.skipped) {
-                this.logger.info(`PD incident ${incidentId} already ${pdResult.status} — skipping`);
+            if (pdResult?.skipped && pdResult?.status === 'resolved') {
+                this.logger.info(`PD incident ${incidentId} already resolved — skipping investigation`);
                 if (incidentId) this.trackedIncidents.delete(incidentId);
                 return;
             }
@@ -1215,15 +1216,18 @@ ${formatted}`
 
         // Enqueue for sequential processing — prevents resource contention from concurrent sessions
         const position = this._enqueueAlert({ incidentId, channelId, messageTs, prompt, alertType: 'pagerduty' });
-        if (position > 1) {
+        const activeSlots = this._queueStmts.countProcessing.get().count;
+        const maxConcurrent = this.config.alertMaxConcurrent || 1;
+        const canStartNow = position === 1 && activeSlots < maxConcurrent;
+
+        if (canStartNow) {
+            await this._addReaction(channelId, messageTs, 'eyes');
+        } else if (position > 0) {
             // Queued — react with hourglass (swapped to eyes when dequeued)
             await this._addReaction(channelId, messageTs, 'hourglass_flowing_sand');
             await this.app.client.chat.postMessage({
-                channel: channelId, text: `\u23f3 Queued for investigation (position ${position})`, thread_ts: messageTs
+                channel: channelId, text: `\u23f3 Queued for investigation (position ${position}, ${activeSlots}/${maxConcurrent} slots busy)`, thread_ts: messageTs
             }).catch(() => {});
-        } else {
-            // Starting immediately
-            await this._addReaction(channelId, messageTs, 'eyes');
         }
         this._processNextInQueue();
     }
@@ -2085,8 +2089,15 @@ ${formatted}`
                                 // claude-hook-notify.js (Stop hook) which reads the clean transcript.
                                 const reason = hasCompletionMarker ? 'completion marker found' : `fallback after ${alertAccumulationCount} cycles`;
                                 this.logger.info(`Alert poller done (${reason}): ${alertBuffer.length} chars for ${sessionName} — hook will post`);
+                                isFirstResponse = false;
                                 clearInterval(interval);
                                 this.pollers.delete(pollKey);
+                                // Free the queue slot immediately so the next alert can start
+                                if (session.alertMessageTs) {
+                                    this._removeReaction(session.channelId, session.alertMessageTs, 'eyes').catch(() => {});
+                                    this._addReaction(session.channelId, session.alertMessageTs, 'white_check_mark').catch(() => {});
+                                    this._completeQueueItem(session.channelId, session.alertMessageTs);
+                                }
                                 return;
                             } else {
                                 this.logger.info(`Alert accumulating cycle ${alertAccumulationCount} (${alertBuffer.length} chars) for ${sessionName}, waiting for completion marker`);
@@ -3126,32 +3137,12 @@ ${formatted}`
             // Respond immediately — process async
             res.status(200).json({ status: 'accepted', incidentId });
 
-            // Async: find Slack message and trigger investigation
+            // Async: ACK PagerDuty and notify owner.
+            // Investigation is handled by Socket Mode via the alert queue.
+            // NOTE: Do NOT set trackedIncidents early — it blocks Socket Mode
+            // from enqueuing the alert (was the cause of the race condition bug).
             try {
-                this.trackedIncidents.set(incidentId, {}); // placeholder until we find the Slack message
-
-                const found = await this._findPagerDutySlackMessage(incidentId);
-                if (!found) {
-                    this.logger.error(`PD webhook: Slack message not found for ${incidentId} after retries`);
-                    this.trackedIncidents.delete(incidentId);
-                    return;
-                }
-
-                const { channelId, message } = found;
-                const messageTs = message.ts;
-                this.trackedIncidents.set(incidentId, { channelId, messageTs });
-
-                // Race check — Socket Mode may have handled it while we searched
-                const sessionKey = `${channelId}-${messageTs}`;
-                if (this._getSession(sessionKey)) {
-                    this.logger.info(`PD webhook: session already exists for ${sessionKey}`);
-                    this._notifyOwnerIncidentAcked(incidentId, event.data).catch(err =>
-                        this.logger.error(`Failed to notify owner of acked incident: ${err.message}`)
-                    );
-                    return;
-                }
-
-                // Acknowledge PD
+                // Acknowledge PD immediately (before searching for Slack message)
                 if (this.config.pagerdutyApiToken) {
                     const pdResult = await this._acknowledgePagerDuty(incidentId);
                     if (pdResult?.skipped) {
@@ -3159,39 +3150,65 @@ ${formatted}`
                         this._notifyOwnerIncidentAcked(incidentId, event.data).catch(err =>
                             this.logger.error(`Failed to notify owner of acked incident: ${err.message}`)
                         );
-                        this.trackedIncidents.delete(incidentId);
                         return;
                     }
                 }
 
-                // React with eyes
-                await this._addReaction(channelId, messageTs, 'eyes');
-
-                // Download attached images
-                const imagePaths = await this._downloadSlackImages(message.files, `alert-${messageTs.replace('.', '')}`);
-                const imageInstruction = imagePaths.length > 0
-                    ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
-                    : '';
-
-                // Build prompt
-                const permalink = await this._getPermalink(channelId, messageTs);
-                const text = message.text || '';
-                const alertSkill = this.config.alertSkill;
-                let prompt;
-                if (alertSkill && permalink) {
-                    prompt = `execute ${alertSkill} skill with argument ${permalink}${imageInstruction}`;
-                } else if (alertSkill) {
-                    prompt = `execute ${alertSkill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
-                } else {
-                    prompt = `Investigate this PagerDuty alert: ${(permalink || text).substring(0, 500)}${imageInstruction}`;
+                // Find the Slack message for the permalink (for owner notification)
+                const found = await this._findPagerDutySlackMessage(incidentId);
+                if (!found) {
+                    this.logger.info(`PD webhook: Slack message not found for ${incidentId} — Socket Mode will handle`);
+                    // Notify owner without permalink
+                    this._notifyOwnerIncidentWebhook(incidentId, event.data, {}).catch(err =>
+                        this.logger.error(`Failed to notify owner of incident webhook: ${err.message}`)
+                    );
+                    return;
                 }
 
-                this.logger.info(`PD webhook: notifying owner for ${incidentId} (Socket Mode handles investigation via queue)`);
+                const { channelId, message } = found;
+                const messageTs = message.ts;
+                const permalink = await this._getPermalink(channelId, messageTs);
 
-                // Notify owner — Socket Mode path handles the actual investigation queue
+                // Notify owner
                 this._notifyOwnerIncidentWebhook(incidentId, event.data, { permalink }).catch(err =>
                     this.logger.error(`Failed to notify owner of incident webhook: ${err.message}`)
                 );
+
+                // Fallback: if Socket Mode is disconnected, enqueue from webhook
+                // (Socket Mode won't receive the Slack message, so nobody else will enqueue)
+                if (!this.connected) {
+                    this.logger.warn(`PD webhook: Socket Mode disconnected — enqueueing ${incidentId} as fallback`);
+                    this.trackedIncidents.set(incidentId, { channelId, messageTs });
+
+                    const imagePaths = await this._downloadSlackImages(message.files, `alert-${messageTs.replace('.', '')}`);
+                    const imageInstruction = imagePaths.length > 0
+                        ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
+                        : '';
+                    const text = message.text || '';
+                    const alertSkill = this.config.alertSkill;
+                    let prompt;
+                    if (alertSkill && permalink) {
+                        prompt = `execute ${alertSkill} skill with argument ${permalink}${imageInstruction}`;
+                    } else if (alertSkill) {
+                        prompt = `execute ${alertSkill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
+                    } else {
+                        prompt = `Investigate this PagerDuty alert: ${(permalink || text).substring(0, 500)}${imageInstruction}`;
+                    }
+
+                    const position = this._enqueueAlert({ incidentId, channelId, messageTs, prompt, alertType: 'pagerduty' });
+                    if (position > 0) {
+                        const activeSlots = this._queueStmts.countProcessing.get().count;
+                        const maxConcurrent = this.config.alertMaxConcurrent || 1;
+                        if (position === 1 && activeSlots < maxConcurrent) {
+                            await this._addReaction(channelId, messageTs, 'eyes');
+                        } else {
+                            await this._addReaction(channelId, messageTs, 'hourglass_flowing_sand');
+                        }
+                        this._processNextInQueue();
+                    }
+                } else {
+                    this.logger.info(`PD webhook: ACKed ${incidentId}, Socket Mode will handle investigation via queue`);
+                }
             } catch (err) {
                 this.logger.error(`PD webhook error for ${incidentId}: ${err.message}`);
                 this.trackedIncidents.delete(incidentId);
