@@ -249,6 +249,31 @@ async function sendResponse(web, channelId, threadTs, response, stats, mentionUs
     }
 }
 
+/**
+ * Free the alert_queue slot once the investigation report has been posted.
+ * The tmux session stays alive so the user can ask follow-ups in-thread, but
+ * the queue slot is released so the next pending alert can start.
+ */
+function markAlertQueueComplete(channelId, alertMessageTs) {
+    if (!channelId || !alertMessageTs) return;
+    try {
+        const Database = require('better-sqlite3');
+        const dbPath = path.join(projectDir, 'src/data/slack-sessions.db');
+        if (!fs.existsSync(dbPath)) return;
+        const db = new Database(dbPath);
+        const result = db.prepare(
+            "UPDATE alert_queue SET status = 'completed', updated_at = ? " +
+            "WHERE channel_id = ? AND message_ts = ? AND status = 'processing'"
+        ).run(Date.now(), channelId, alertMessageTs);
+        db.close();
+        if (result.changes > 0) {
+            console.log(`Alert queue: freed slot for channel=${channelId} ts=${alertMessageTs}`);
+        }
+    } catch (err) {
+        console.error(`Failed to free alert queue slot: ${err.message}`);
+    }
+}
+
 async function sendHookNotification() {
     const notificationType = process.argv[2] || 'completed';
     const currentDir = process.cwd();
@@ -467,6 +492,10 @@ async function sendHookNotification() {
                             title: 'Full Investigation Report',
                             initial_comment: '_Full investigation details attached._',
                         });
+
+                        // Investigation done — free queue slot so next pending alert can start.
+                        // tmux session stays alive for follow-up @mentions in this thread.
+                        markAlertQueueComplete(channelId, alertMessageTs);
                     } else {
                         // No valid report — Claude likely stalled mid-investigation.
                         // If tmux is alive, nudge Claude to continue (up to MAX_HOOK_RETRIES).
@@ -527,6 +556,9 @@ async function sendHookNotification() {
                                 console.error(`Failed to upload raw debug output: ${err.message}`);
                             }
                         }
+
+                        // Retries exhausted — free queue slot so next pending alert isn't blocked
+                        markAlertQueueComplete(channelId, alertMessageTs);
                     }
 
                     console.log(`Alert response posted (${assistantMessage.length} chars) to ${channelId} thread=${threadTs}`);
