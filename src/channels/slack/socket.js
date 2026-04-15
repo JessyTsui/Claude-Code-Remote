@@ -57,6 +57,7 @@ class SlackSocketHandler {
         // Alert monitoring
         this.alertMonitor = new AlertMonitor(this.app, config);
         this.trackedIncidents = new Map(); // incidentId → { channelId, messageTs }
+        this._ackInFlight = new Map();     // incidentId → Promise — dedup concurrent PD acks
 
         // Delay alert monitoring
         this.delayAlertMonitor = new DelayAlertMonitor(this.app, this.db, config);
@@ -451,6 +452,23 @@ class SlackSocketHandler {
     // ─── PagerDuty API ──────────────────────────────────────────────
 
     async _acknowledgePagerDuty(incidentId) {
+        if (!incidentId) return null;
+        // Dedup concurrent calls: if an ack is in flight (or completed within the TTL),
+        // return the same Promise so only one PD API round-trip runs per incident.
+        // Fixes the race where webhook + Socket Mode both fired PUT /incidents/{id} and
+        // PagerDuty's bot posted "Acknowledged" twice.
+        if (this._ackInFlight.has(incidentId)) {
+            return this._ackInFlight.get(incidentId);
+        }
+        const promise = this._doAcknowledgePagerDuty(incidentId);
+        this._ackInFlight.set(incidentId, promise);
+        // Keep the entry for 60s so late callers also hit the cached result
+        // (PD status may lag a few seconds after our PUT).
+        setTimeout(() => this._ackInFlight.delete(incidentId), 60_000);
+        return promise;
+    }
+
+    async _doAcknowledgePagerDuty(incidentId) {
         const token = this.config.pagerdutyApiToken;
         const fromEmail = this.config.pagerdutyFromEmail;
         if (!token || !incidentId) return null;
