@@ -1531,6 +1531,8 @@ ${formatted}`
                 if (session.alertMessageTs) {
                     await this._removeReaction(channelId, session.alertMessageTs, 'eyes');
                     await this._addReaction(channelId, session.alertMessageTs, 'white_check_mark');
+                    // Free the queue slot so the next pending alert can start
+                    this._completeQueueItem(channelId, session.alertMessageTs);
                 }
                 await this.app.client.reactions.add({
                     channel: channelId,
