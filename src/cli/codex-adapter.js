@@ -112,10 +112,35 @@ module.exports = {
         return `${fallbackIntro}: ${snippet}${imageInstruction}`;
     },
 
+    // Codex ready = footer prompt visible AND no MCP boot banner still on-screen.
+    // The MCP banner (`• Starting MCP servers (N/M): sonarqube (6s • esc to interrupt)`)
+    // contains "esc to interrupt", which collides with real turn activity. A slow MCP
+    // server (e.g. sonarqube) can keep this line visible for 30–60s, so the readiness
+    // budget is generous.
+    readinessTimeoutMs: 90000,
+
+    isReady(output) {
+        if (/Starting MCP servers/.test(output)) return false;
+        return /\n\s*› /.test(output);
+    },
+
+    // Working indicators match the *real* turn spinner. Codex shows a leading
+    // bullet ("• Thinking…", "• Running tool…") paired with "esc to interrupt"
+    // during a live turn. The same "esc to interrupt" text also appears in the
+    // MCP-startup banner, so we filter that line out of the detection window
+    // (see _pollForResponse in socket.js). Kept deliberately narrow so idle
+    // help text ("/review …", "/diff …") doesn't falsely match.
     workingIndicators: [
-        'thinking', 'working', 'esc to interrupt', 'running', 'generating', 'processing'
+        'esc to interrupt'
     ],
     workingRegexes: [],
+
+    // Lines matching these patterns are stripped from the working-state
+    // detection window. Used to suppress the MCP startup banner that would
+    // otherwise look like a live turn.
+    workingExcludePatterns: [
+        /Starting MCP servers/i
+    ],
 
     confirmationPrompts: [],
     handlesConfirmationPrompts: false,

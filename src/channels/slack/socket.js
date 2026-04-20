@@ -1684,8 +1684,12 @@ ${formatted}`
                     resolve(false);
                     return;
                 }
-                // Poll for Claude Code readiness instead of hardcoded wait
-                const maxWaitMs = 30000;
+                // Poll until the CLI's TUI reports ready. Each adapter defines
+                // its own readiness probe because Claude Code and Codex render
+                // very different footers (e.g. Codex's prompt is `› <placeholder>`
+                // on the same line, and Codex may still be loading MCP servers).
+                const readyAdapter = getCliAdapter(cliType);
+                const maxWaitMs = readyAdapter.readinessTimeoutMs || 30000;
                 const pollIntervalMs = 1000;
                 let elapsed = 0;
                 const poll = () => {
@@ -1695,9 +1699,8 @@ ${formatted}`
                             encoding: 'utf8',
                             stdio: ['ignore', 'pipe', 'ignore']
                         });
-                        // Claude Code shows ) or ❯ or > as input prompt when ready
-                        if (/^[)❯>]\s*$/m.test(output)) {
-                            this.logger.info(`Claude Code ready after ${elapsed}ms`);
+                        if (readyAdapter.isReady && readyAdapter.isReady(output)) {
+                            this.logger.info(`${cliType} ready after ${elapsed}ms`);
                             resolve(true);
                             return;
                         }
@@ -1705,7 +1708,7 @@ ${formatted}`
                         // capture failed, keep polling
                     }
                     if (elapsed >= maxWaitMs) {
-                        this.logger.warn(`Claude Code readiness timeout after ${maxWaitMs}ms, proceeding anyway`);
+                        this.logger.warn(`${cliType} readiness timeout after ${maxWaitMs}ms, proceeding anyway`);
                         resolve(true);
                         return;
                     }
@@ -1720,10 +1723,19 @@ ${formatted}`
     async _injectCommand(sessionName, command, cliType = 'claude') {
         const os = require('os');
         const adapter = getCliAdapter(cliType);
+        const excludePatterns = adapter.workingExcludePatterns || [];
         const indicatorHit = (text) => {
-            const lower = (text || '').toLowerCase();
-            if (adapter.workingIndicators.some(ind => lower.includes(ind))) return true;
-            return (adapter.workingRegexes || []).some(re => re.test(lower));
+            // Strip lines the adapter declares as chrome (e.g. Codex MCP startup
+            // banner) before matching — otherwise "esc to interrupt" in the
+            // banner makes the injector think Codex accepted Enter when it
+            // didn't, and the prompt is silently lost.
+            const filtered = (text || '')
+                .split('\n')
+                .filter(l => !excludePatterns.some(re => re.test(l)))
+                .join('\n')
+                .toLowerCase();
+            if (adapter.workingIndicators.some(ind => filtered.includes(ind))) return true;
+            return (adapter.workingRegexes || []).some(re => re.test(filtered));
         };
         const tmpFile = path.join(os.tmpdir(), `cli-inject-${sessionName}-${Date.now()}.txt`);
         try {
@@ -1951,7 +1963,13 @@ ${formatted}`
             const wideLines = lines.slice(-30);
             // Exclude OMC status bar lines (contain "[OMC#") from isWorking check —
             // the status bar can show stale "thinking" even when Claude is idle.
-            const nonStatusLines = wideLines.filter(l => !l.includes('[OMC#'));
+            // Adapter-specific excludes drop chrome that contains working-verb
+            // substrings (e.g. Codex's MCP startup banner has "esc to interrupt").
+            const excludePatterns = adapter.workingExcludePatterns || [];
+            const nonStatusLines = wideLines.filter(l => {
+                if (l.includes('[OMC#')) return false;
+                return !excludePatterns.some(re => re.test(l));
+            });
             const tailText = nonStatusLines.join(' ').toLowerCase();
             // Working-state detection comes from the adapter so each CLI has its own
             // indicator set (Claude Code rotates verbs like "Burrowing" / "Metamorphosing";

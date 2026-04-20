@@ -74,6 +74,14 @@ module.exports = {
         return process.env.SLACK_CLAUDE_COMMAND || 'claude --dangerously-skip-permissions';
     },
 
+    // How long to wait for the TUI to be ready before injecting the first command.
+    readinessTimeoutMs: 30000,
+
+    // Claude Code shows ) or ❯ or > alone on a line when it's accepting input.
+    isReady(output) {
+        return /^[)❯>]\s*$/m.test(output);
+    },
+
     buildAlertPrompt({ skill, permalink, fallbackText = '', imageInstruction = '', fallbackIntro = 'Investigate this alert' } = {}) {
         const snippet = (fallbackText || '').substring(0, 500);
         if (skill && permalink) {
