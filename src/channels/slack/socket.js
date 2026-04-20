@@ -278,12 +278,12 @@ class SlackSocketHandler {
 
         // Swap hourglass → eyes for items that waited in the queue
         const waitedMs = Date.now() - item.created_at;
-        if (waitedMs > 5000) {
+        if (waitedMs > 60000) {
             this._removeReaction(item.channel_id, item.message_ts, 'hourglass_flowing_sand').catch(() => {});
             this._addReaction(item.channel_id, item.message_ts, 'eyes').catch(() => {});
             this.app.client.chat.postMessage({
                 channel: item.channel_id,
-                text: `:mag: Starting investigation (waited ${Math.round(waitedMs / 1000)}s in queue)...`,
+                text: `:mag: Starting investigation (waited ${Math.round(waitedMs / 60000)}m in queue)...`,
                 thread_ts: item.message_ts
             }).catch(err => this.logger.error(`Failed to post queue start notice: ${err.message}`));
         }
@@ -2876,6 +2876,11 @@ ${formatted}`
                 this.logger.error(`Trigger delay alert error: ${error.message}`);
                 res.status(500).json({ error: error.message });
             }
+        });
+
+        httpApp.post('/queue/kick', (req, res) => {
+            this._processNextInQueue();
+            res.status(204).end();
         });
 
         httpApp.get('/queue', (req, res) => {

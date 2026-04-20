@@ -268,10 +268,31 @@ function markAlertQueueComplete(channelId, alertMessageTs) {
         db.close();
         if (result.changes > 0) {
             console.log(`Alert queue: freed slot for channel=${channelId} ts=${alertMessageTs}`);
+            kickQueue();
         }
     } catch (err) {
         console.error(`Failed to free alert queue slot: ${err.message}`);
     }
+}
+
+/**
+ * Nudge the main Socket process to dequeue the next pending alert immediately.
+ * Fire-and-forget — we don't care if the HTTP server isn't reachable.
+ */
+function kickQueue() {
+    try {
+        const port = process.env.SLACK_HTTP_PORT || 9999;
+        const http = require('http');
+        const req = http.request({
+            hostname: '127.0.0.1',
+            port,
+            path: '/queue/kick',
+            method: 'POST',
+            timeout: 2000,
+        });
+        req.on('error', () => {});
+        req.end();
+    } catch {}
 }
 
 async function sendHookNotification() {
