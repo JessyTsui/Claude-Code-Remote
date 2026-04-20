@@ -520,7 +520,7 @@ async function sendHookNotification() {
                     } else {
                         // No valid report — Claude likely stalled mid-investigation.
                         // If tmux is alive, nudge Claude to continue (up to MAX_HOOK_RETRIES).
-                        const HOOK_MAX_RETRIES = 2;
+                        const HOOK_MAX_RETRIES = parseInt(process.env.HOOK_MAX_RETRIES, 10) || 3;
                         const retryFile = `/tmp/hook-retry-${slackSessionKey}`;
                         let retryCount = 0;
                         try { retryCount = parseInt(fs.readFileSync(retryFile, 'utf-8').trim(), 10) || 0; } catch { /* first attempt */ }
