@@ -2461,7 +2461,7 @@ ${formatted}`
                 channel_id: channelId || this.config.channelId,
                 thread_ts: threadTs,
                 content: response,
-                filename: `alert-investigation-${Date.now()}.txt`,
+                filename: `alert-investigation-${Date.now()}.md`,
                 title: 'Full Investigation Report',
                 initial_comment: '_Full investigation details attached._',
             });
