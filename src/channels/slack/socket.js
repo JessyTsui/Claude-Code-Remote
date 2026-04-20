@@ -44,10 +44,9 @@ class SlackSocketHandler {
         this._wsErrors = [];                  // timestamps of recent WS errors
         this._wsErrorWindowMs = 120000;       // 2-minute sliding window
         this._wsRestarting = false;           // prevent concurrent restarts
-        this._wsEscalationLevel = 0;         // 0=none, 1=warn, 2=restart, 3=notify, 4=exit
+        this._wsEscalationLevel = 0;         // 0=none, 1=warn, 2=restart, 3=exit+notify
         this._lastOwnerNotifyTs = 0;          // cooldown for owner DM
         this._ownerNotifyCooldownMs = 300000; // 5 min cooldown
-        this._wsFailureNotified = false;      // true after a Stage 3 DM; used to fire a matching recovery DM
         this._startedAt = Date.now();         // for uptime reporting
         this._wsRestartWindowMs = 600000;     // 10 min window for restart tracking
         this._wsRestartStateFile = path.join(__dirname, '../../data/ws-restart-state.json');
@@ -761,13 +760,8 @@ ${formatted}`
             if (this._wsStabilityTimer) clearTimeout(this._wsStabilityTimer);
             this._wsStabilityTimer = setTimeout(() => {
                 if (this.connected) {
-                    const restartsBeforeClear = this._getRestartsInWindow();
                     this._clearRestartState();
                     this.logger.info('WebSocket stable for 5min — cleared restart state');
-                    if (this._wsFailureNotified) {
-                        this._notifyOwnerWsRecovered(restartsBeforeClear);
-                        this._wsFailureNotified = false;
-                    }
                 }
             }, 300000); // 5 min
         });
@@ -925,16 +919,11 @@ ${formatted}`
             this._attemptWsRecoveryRestart();
         }
 
-        // Stage 3: NOTIFY owner (2+ restarts in 10 min — restart loop detected)
-        if (restartsInWindow >= 2 && this._wsEscalationLevel < 3) {
+        // Stage 3: EXIT process (3+ restarts in 10 min — auto-recovery failed)
+        // Owner DM only fires here; earlier stages are handled silently since
+        // auto-recovery reliably succeeds on restart #1 or #2.
+        if (restartsInWindow >= 3 && this._wsEscalationLevel < 3) {
             this._wsEscalationLevel = 3;
-            this.logger.warn(`WebSocket restart loop: ${restartsInWindow} restarts in 10min — notifying owner`);
-            this._notifyOwnerWsFailure(count, false, restartsInWindow);
-        }
-
-        // Stage 4: EXIT process (3+ restarts in 10 min — unrecoverable)
-        if (restartsInWindow >= 3 && this._wsEscalationLevel < 4) {
-            this._wsEscalationLevel = 4;
             this.logger.error(`WebSocket unrecoverable: ${restartsInWindow} restarts in 10min — exiting process`);
             this._notifyOwnerWsFailure(count, true, restartsInWindow).finally(() => {
                 process.exit(1);
@@ -1015,31 +1004,9 @@ ${formatted}`
                 channel: ownerId,
                 text,
             });
-            this._wsFailureNotified = true;
             this.logger.info('Owner notified of WebSocket failure via DM');
         } catch (err) {
             this.logger.error(`Failed to notify owner: ${err.message}`);
-        }
-    }
-
-    async _notifyOwnerWsRecovered(restartsDuringIncident = 0) {
-        const ownerId = this.config.ownerUserId;
-        if (!ownerId) return;
-
-        const uptimeMin = Math.round((Date.now() - this._startedAt) / 60000);
-        const text = [
-            `:white_check_mark: *WebSocket Recovered*`,
-            `*Status:* Stable for 5 minutes — restart state cleared.`,
-            `*Restarts during incident:* ${restartsDuringIncident}`,
-            `*Uptime:* ${uptimeMin} minutes`,
-            `*Action:* No intervention required — the previous alert resolved automatically.`,
-        ].join('\n');
-
-        try {
-            await this.app.client.chat.postMessage({ channel: ownerId, text });
-            this.logger.info('Owner notified of WebSocket recovery via DM');
-        } catch (err) {
-            this.logger.error(`Failed to notify owner of recovery: ${err.message}`);
         }
     }
 
