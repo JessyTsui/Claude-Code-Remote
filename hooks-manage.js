@@ -1,154 +1,114 @@
 #!/usr/bin/env node
 
 /**
- * Manage Claude Code hooks for Claude-Code-Remote.
+ * Manage CLI hooks for Claude-Code-Remote.
+ *
+ * Each adapter is isolated — installing/uninstalling one CLI's hooks never
+ * touches another CLI's config file. You must name the CLI you want to manage
+ * (or pass `all` to target every registered adapter).
  *
  * Usage:
- *   node hooks-manage.js install    — Add Stop/SubagentStop hooks to ~/.claude/settings.json
- *   node hooks-manage.js uninstall  — Remove them
- *   node hooks-manage.js status     — Show current hook state
+ *   node hooks-manage.js install <claude|codex|all>
+ *   node hooks-manage.js uninstall <claude|codex|all>
+ *   node hooks-manage.js status [claude|codex|all]
  */
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+const { getCliAdapter, listAdapters, adapterNames } = require('./src/cli');
 
-const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
-const hookScript = path.join(__dirname, 'claude-hook-notify.js');
-const HOOK_MARKER = 'claude-hook-notify';
-const TIMEOUT = 15;
-
-function loadSettings() {
-    if (!fs.existsSync(settingsPath)) return {};
-    return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-}
-
-function saveSettings(settings) {
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-}
-
-function hasHook(list) {
-    return Array.isArray(list) && list.some(e =>
-        Array.isArray(e.hooks) && e.hooks.some(h => h.command?.includes(HOOK_MARKER))
-    );
-}
-
-function removeHook(list) {
-    if (!Array.isArray(list)) return list;
-    const filtered = list
-        .map(entry => {
-            if (!Array.isArray(entry.hooks)) return entry;
-            const remaining = entry.hooks.filter(h => !h.command?.includes(HOOK_MARKER));
-            return remaining.length > 0 ? { ...entry, hooks: remaining } : null;
-        })
-        .filter(Boolean);
-    return filtered.length > 0 ? filtered : undefined;
-}
-
-// ─── Commands ────────────────────────────────────────────────────
-
-function install() {
-    const settings = loadSettings();
-    settings.hooks = settings.hooks || {};
-    settings.hooks.SessionStart = settings.hooks.SessionStart || [];
-    settings.hooks.Stop = settings.hooks.Stop || [];
-    settings.hooks.SubagentStop = settings.hooks.SubagentStop || [];
-
-    let changed = false;
-
-    if (!hasHook(settings.hooks.SessionStart)) {
-        settings.hooks.SessionStart.push({
-            matcher: '*',
-            hooks: [{ type: 'command', command: `node ${hookScript} session_start`, timeout: TIMEOUT }]
-        });
-        changed = true;
+function resolveTargets(name) {
+    if (!name || name === 'all') return listAdapters();
+    const adapter = getCliAdapter(name);
+    if (!adapter || adapter.type !== name.toLowerCase()) {
+        console.error(`Unknown CLI: "${name}". Available: ${adapterNames().join(', ')}, or "all".`);
+        process.exit(1);
     }
+    return [adapter];
+}
 
-    if (!hasHook(settings.hooks.Stop)) {
-        settings.hooks.Stop.push({
-            matcher: '*',
-            hooks: [{ type: 'command', command: `node ${hookScript} completed`, timeout: TIMEOUT }]
-        });
-        changed = true;
-    }
-
-    if (!hasHook(settings.hooks.SubagentStop)) {
-        settings.hooks.SubagentStop.push({
-            matcher: '*',
-            hooks: [{ type: 'command', command: `node ${hookScript} waiting`, timeout: TIMEOUT }]
-        });
-        changed = true;
-    }
-
-    if (changed) {
-        saveSettings(settings);
-        console.log('Hooks installed in', settingsPath);
-        console.log('  SessionStart →', `node ${hookScript} session_start`);
-        console.log('  Stop         →', `node ${hookScript} completed`);
-        console.log('  SubagentStop →', `node ${hookScript} waiting`);
+function printInstall(adapter, result) {
+    if (result.changed) {
+        console.log(`[${adapter.type}] hooks installed in ${result.path}`);
+        if (result.commands) {
+            for (const [event, cmd] of Object.entries(result.commands)) {
+                console.log(`  ${event.padEnd(13)} → ${cmd}`);
+            }
+        }
+        if (result.command) {
+            console.log(`  Stop          → ${result.command}`);
+        }
+        if (result.notifyLine) {
+            console.log(`  ${result.notifyLine}`);
+        }
     } else {
-        console.log('Hooks already installed.');
+        console.log(`[${adapter.type}] hooks already installed in ${result.path}`);
+    }
+    if (result.warning) console.log(`[${adapter.type}] warning: ${result.warning}`);
+}
+
+function install(targets) {
+    let anyChanged = false;
+    for (const adapter of targets) {
+        const result = adapter.installHooks();
+        if (result.changed) anyChanged = true;
+        printInstall(adapter, result);
+    }
+    if (!anyChanged) console.log('Nothing to do.');
+}
+
+function uninstall(targets) {
+    let anyChanged = false;
+    for (const adapter of targets) {
+        const result = adapter.uninstallHooks();
+        if (result.changed) {
+            anyChanged = true;
+            console.log(`[${adapter.type}] hooks removed from ${result.path}`);
+        } else {
+            console.log(`[${adapter.type}] no hooks found at ${result.path}`);
+        }
+    }
+    if (!anyChanged) console.log('Nothing to remove.');
+}
+
+function status(targets) {
+    for (const adapter of targets) {
+        const s = adapter.hooksStatus();
+        console.log(`[${adapter.type}] hooks status:`);
+        for (const [event, installed] of Object.entries(s.installed || {})) {
+            console.log(`  ${event.padEnd(13)} ${installed ? '✓ installed' : '✗ not installed'}`);
+        }
+        console.log(`  Settings file: ${s.path}`);
+        if (s.line) console.log(`  Line:          ${s.line}`);
+        if (s.featureEnabled === false) {
+            console.log(`  ⚠ codex_hooks feature NOT enabled in config.toml — hooks will be ignored`);
+        }
     }
 }
 
-function uninstall() {
-    const settings = loadSettings();
-    if (!settings.hooks) {
-        console.log('No hooks found.');
-        return;
-    }
-
-    let changed = false;
-
-    if (hasHook(settings.hooks.Stop)) {
-        settings.hooks.Stop = removeHook(settings.hooks.Stop);
-        if (!settings.hooks.Stop) delete settings.hooks.Stop;
-        changed = true;
-    }
-
-    if (hasHook(settings.hooks.SessionStart)) {
-        settings.hooks.SessionStart = removeHook(settings.hooks.SessionStart);
-        if (!settings.hooks.SessionStart) delete settings.hooks.SessionStart;
-        changed = true;
-    }
-
-    if (hasHook(settings.hooks.SubagentStop)) {
-        settings.hooks.SubagentStop = removeHook(settings.hooks.SubagentStop);
-        if (!settings.hooks.SubagentStop) delete settings.hooks.SubagentStop;
-        changed = true;
-    }
-
-    if (changed) {
-        saveSettings(settings);
-        console.log('Hooks removed from', settingsPath);
-    } else {
-        console.log('No Claude-Code-Remote hooks found to remove.');
-    }
+function usage() {
+    const names = adapterNames().join('|');
+    console.log(`Usage: node hooks-manage.js <install|uninstall|status> <${names}|all>`);
+    console.log(`  or:  npm run hooks:install <${names}|all>`);
+    console.log('');
+    console.log('Each CLI is managed independently — installing codex hooks does NOT touch claude config, and vice versa.');
+    process.exit(1);
 }
 
-function status() {
-    const settings = loadSettings();
-    const sessionStartInstalled = hasHook(settings.hooks?.SessionStart);
-    const stopInstalled = hasHook(settings.hooks?.Stop);
-    const subagentInstalled = hasHook(settings.hooks?.SubagentStop);
+const [, , command, target] = process.argv;
 
-    console.log('Claude-Code-Remote hooks status:');
-    console.log(`  SessionStart  ${sessionStartInstalled ? '✓ installed' : '✗ not installed'}`);
-    console.log(`  Stop          ${stopInstalled ? '✓ installed' : '✗ not installed'}`);
-    console.log(`  SubagentStop  ${subagentInstalled ? '✓ installed' : '✗ not installed'}`);
-    console.log(`  Settings file: ${settingsPath}`);
+if (!command) usage();
+
+// status defaults to "all" when no target given; install/uninstall require explicit target.
+const requiresTarget = command === 'install' || command === 'uninstall';
+if (requiresTarget && !target) {
+    console.error(`"${command}" requires a CLI name so you don't accidentally edit another CLI's config.`);
+    usage();
 }
 
-// ─── CLI ─────────────────────────────────────────────────────────
-
-const command = process.argv[2];
+const targets = resolveTargets(target || 'all');
 
 switch (command) {
-    case 'install':   install();   break;
-    case 'uninstall': uninstall(); break;
-    case 'status':    status();    break;
-    default:
-        console.log('Usage: node hooks-manage.js [install|uninstall|status]');
-        console.log('  or:  npm run hooks:install / hooks:uninstall / hooks:status');
-        process.exit(1);
+    case 'install':   install(targets);   break;
+    case 'uninstall': uninstall(targets); break;
+    case 'status':    status(targets);    break;
+    default:          usage();
 }

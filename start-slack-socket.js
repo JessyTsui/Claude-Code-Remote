@@ -34,6 +34,7 @@ const config = {
     // Alert monitoring
     monitorChannels: process.env.MONITOR_CHANNELS || '',
     alertSkill: process.env.ALERT_SKILL || '',
+    alertCli: (process.env.ALERT_CLI || '').toLowerCase() || 'claude',
     sessionInactivityTimeoutMs: parseInt(process.env.SESSION_INACTIVITY_TIMEOUT_MS) || 300000,
     pollerTimeoutMs: parseInt(process.env.POLLER_TIMEOUT_MS) || 1800000, // 30 min
     alertMaxConcurrent: parseInt(process.env.ALERT_MAX_CONCURRENT) || 1,
@@ -46,6 +47,7 @@ const config = {
     delayAlertWindowMs: process.env.DELAY_ALERT_WINDOW_MS || '3600000',
     delayAlertTaskPatterns: process.env.DELAY_ALERT_TASK_PATTERNS || '',
     delayAlertSkill: process.env.DELAY_ALERT_SKILL || 'one:pay-ops-tax-production',
+    delayAlertCli: (process.env.DELAY_ALERT_CLI || '').toLowerCase() || 'claude',
     // Daily summary
     dailySummaryChannels: process.env.DAILY_SUMMARY_CHANNELS || '',
     dailySummaryTime: process.env.DAILY_SUMMARY_TIME || '07:00',
@@ -165,12 +167,14 @@ async function start() {
     logger.info(`- HTTP Port: ${config.httpPort}`);
     logger.info(`- Monitor Channels: ${config.monitorChannels || 'None'}`);
     logger.info(`- Alert Skill: ${config.alertSkill || 'None'}`);
+    logger.info(`- Alert CLI: ${config.alertCli}`);
     logger.info(`- Alert Max Concurrent: ${config.alertMaxConcurrent}`);
     logger.info(`- PagerDuty: ${config.pagerdutyApiToken ? 'Configured' : 'Not configured'}`);
     logger.info(`- Session Inactivity Timeout: ${config.sessionInactivityTimeoutMs}ms`);
     logger.info(`- Poller Timeout: ${config.pollerTimeoutMs}ms`);
     logger.info(`- Delay Monitor Channels: ${config.monitorDelayChannels || 'None'}`);
     logger.info(`- Delay Alert Skill: ${config.delayAlertSkill}`);
+    logger.info(`- Delay Alert CLI: ${config.delayAlertCli}`);
     logger.info(`- Delay Alert Threshold: ${config.delayAlertThreshold} alerts in ${config.delayAlertWindowMs}ms`);
     logger.info(`- Daily Summary: ${config.dailySummaryChannels ? `${config.dailySummaryTime} → ${config.dailySummaryChannels}` : 'Not configured'}`);
     logger.info(`- App Mode: ${config.appMode}`);

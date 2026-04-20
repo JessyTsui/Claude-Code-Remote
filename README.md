@@ -5,8 +5,9 @@ Control [Claude Code](https://claude.ai/code) remotely via Slack. Start tasks lo
 ## Features
 
 - **Two-way Slack control** — @mention the bot with commands, get responses streamed back to the thread
-- **Tmux session management** — Each Slack thread gets its own tmux session with Claude running
-- **Hook-based notifications** — Claude Code Stop/SubagentStop hooks post to the correct Slack thread automatically
+- **Tmux session management** — Each Slack thread gets its own tmux session with Claude (or Codex) running
+- **Multi-CLI support** — Run Claude Code by default, opt into Codex CLI per feature (`ALERT_CLI`, `DELAY_ALERT_CLI`) or per message (`start codex from project …`)
+- **Hook-based notifications** — Claude Stop/SubagentStop and Codex `notify` hooks post to the correct Slack thread automatically
 - **PagerDuty alert monitoring** — Watch Slack channels for PD alerts, auto-start Claude investigation sessions
 - **Daily channel summaries** — AI-powered daily digests of Slack channel activity, delivered via DM or channel
 - **Session persistence** — SQLite-backed sessions survive bot restarts; dead sessions auto-reconcile on startup
@@ -37,9 +38,9 @@ npm run setup
 ```
 
 The interactive wizard will:
-1. Prompt for Slack tokens, channel ID, repo path, etc.
+1. Prompt for Slack tokens, channel ID, repo path, per-feature CLI (Claude/Codex), etc.
 2. Generate `.env`
-3. Merge Claude hooks into `~/.claude/settings.json`
+3. Merge hooks into `~/.claude/settings.json` (Claude) and `~/.codex/config.toml` (Codex)
 
 You can re-run it anytime to update settings.
 
@@ -87,10 +88,16 @@ Add to `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
-    "Stop": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /path/to/Claude-Code-Remote/claude-hook-notify.js completed", "timeout": 5 }] }],
-    "SubagentStop": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /path/to/Claude-Code-Remote/claude-hook-notify.js waiting", "timeout": 5 }] }]
+    "Stop": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /path/to/Claude-Code-Remote/cli-hook-notify.js completed", "timeout": 5 }] }],
+    "SubagentStop": [{ "matcher": "*", "hooks": [{ "type": "command", "command": "node /path/to/Claude-Code-Remote/cli-hook-notify.js waiting", "timeout": 5 }] }]
   }
 }
+```
+
+For Codex, add a top-level line to `~/.codex/config.toml`:
+
+```toml
+notify = ["node", "/path/to/Claude-Code-Remote/cli-hook-notify.js", "completed"]
 ```
 
 ### Start
@@ -113,7 +120,7 @@ Or use the service wrapper:
 
 ```bash
 # Test hook notification (sends to Slack)
-node claude-hook-notify.js completed
+node cli-hook-notify.js completed
 ```
 
 ## How It Works
@@ -132,6 +139,10 @@ Configure PagerDuty alert monitoring to auto-investigate incidents:
 ```env
 MONITOR_CHANNELS=payments-alerts,incidents
 ALERT_SKILL=one:pay-ops-production
+# Which CLI investigates PagerDuty alerts: claude | codex (default: claude)
+ALERT_CLI=claude
+# Which CLI investigates Airflow delay alerts: claude | codex (default: claude)
+DELAY_ALERT_CLI=claude
 PAGERDUTY_API_TOKEN=your-token
 PAGERDUTY_FROM_EMAIL=your-email@company.com
 SESSION_INACTIVITY_TIMEOUT_MS=300000
@@ -194,7 +205,9 @@ See [`docs/architecture.md`](./docs/architecture.md) for detailed data flow diag
 | File | Purpose |
 |------|---------|
 | `start-slack-socket.js` | Server launcher (Socket Mode) |
-| `claude-hook-notify.js` | Hook entry point (Stop/SubagentStop -> Slack) |
+| `cli-hook-notify.js` | Unified hook entry point (Claude Stop/SubagentStop + Codex notify -> Slack) |
+| `claude-hook-notify.js` | Backward-compat shim that forwards to `cli-hook-notify.js` |
+| `src/cli/` | Per-CLI adapters (`claude-adapter.js`, `codex-adapter.js`) + selector |
 | `claude-remote.js` | CLI: `notify`, `test`, `status`, `config` |
 | `setup.js` | Interactive setup wizard |
 | `src/channels/slack/socket.js` | Main runtime — manages sessions, polling, alerts |
@@ -214,12 +227,12 @@ See [`docs/architecture.md`](./docs/architecture.md) for detailed data flow diag
 **Hook notifications not appearing?**
 ```bash
 # Test the hook directly
-node claude-hook-notify.js completed
+node cli-hook-notify.js completed
 
-# Check hooks are installed
+# Check hooks are installed (shows Claude + Codex state)
 npm run hooks:status
 
-# Check Claude is running in a tmux session that the hook can find
+# Check the CLI is running in a tmux session that the hook can find
 tmux list-sessions
 ```
 

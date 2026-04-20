@@ -12,9 +12,11 @@ const path = require('path');
 const readline = require('readline');
 const dotenv = require('dotenv');
 
+const { listAdapters, adapterNames } = require('./src/cli');
+
 const projectRoot = __dirname;
 const envPath = path.join(projectRoot, '.env');
-const hookScriptPath = path.join(projectRoot, 'claude-hook-notify.js');
+const hookScriptPath = path.join(projectRoot, 'cli-hook-notify.js');
 
 const rl = readline.createInterface({
     input: process.stdin,
@@ -63,6 +65,7 @@ function writeEnvFile(values, existingEnv) {
         'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'SLACK_CHANNEL_ID',
         'SLACK_REPO_PATH', 'SLACK_REPO_ROOT', 'SLACK_CLAUDE_COMMAND',
         'SLACK_WHITELIST', 'SLACK_HTTP_PORT',
+        'ALERT_CLI', 'DELAY_ALERT_CLI',
         'LOG_LEVEL'
     ];
 
@@ -96,55 +99,18 @@ function makeHookCommand(event) {
     return `node ${script} ${event}`;
 }
 
-function ensureHooksFile() {
-    const settingsDir = path.join(os.homedir(), '.claude');
-    const settingsPath = path.join(settingsDir, 'settings.json');
-    let settings = {};
-    let existing = false;
-    let backupPath = null;
-
-    if (!fs.existsSync(settingsDir)) {
-        fs.mkdirSync(settingsDir, { recursive: true });
-    }
-
-    if (fs.existsSync(settingsPath)) {
-        existing = true;
+function installAllHooks() {
+    // Routes through every registered CLI adapter — Claude edits ~/.claude/settings.json,
+    // Codex edits ~/.codex/config.toml, etc. Adding a new adapter auto-joins here.
+    const results = [];
+    for (const adapter of listAdapters()) {
         try {
-            settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-        } catch {
-            backupPath = `${settingsPath}.bak-${Date.now()}`;
-            fs.copyFileSync(settingsPath, backupPath);
-            settings = {};
+            results.push({ type: adapter.type, ...adapter.installHooks() });
+        } catch (err) {
+            results.push({ type: adapter.type, error: err.message });
         }
     }
-
-    settings.hooks = settings.hooks || {};
-
-    const stopHooks = Array.isArray(settings.hooks.Stop) ? settings.hooks.Stop : [];
-    const subagentHooks = Array.isArray(settings.hooks.SubagentStop) ? settings.hooks.SubagentStop : [];
-
-    const completedCommand = makeHookCommand('completed');
-    const waitingCommand = makeHookCommand('waiting');
-
-    function upsertHook(list, command) {
-        const exists = list.some(entry =>
-            Array.isArray(entry.hooks) && entry.hooks.some(h => h.command === command)
-        );
-        if (!exists) {
-            list.push({
-                matcher: '*',
-                hooks: [{ type: 'command', command, timeout: 15 }]
-            });
-        }
-        return list;
-    }
-
-    settings.hooks.Stop = upsertHook(stopHooks, completedCommand);
-    settings.hooks.SubagentStop = upsertHook(subagentHooks, waitingCommand);
-
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-
-    return { settingsPath, existing, backupPath };
+    return results;
 }
 
 async function main() {
@@ -165,6 +131,18 @@ async function main() {
     const whitelist = await ask('Whitelist user IDs (comma-separated, empty=all)', existingEnv.SLACK_WHITELIST || '');
     const httpPort = await ask('HTTP API port', existingEnv.SLACK_HTTP_PORT || '9999');
 
+    console.log('\n  CLI Selection (per feature)\n');
+
+    const cliChoices = adapterNames().join('/');
+    const alertCli = (await ask(
+        `CLI for PagerDuty alerts (${cliChoices})`,
+        existingEnv.ALERT_CLI || 'claude'
+    )).toLowerCase();
+    const delayAlertCli = (await ask(
+        `CLI for Airflow delay alerts (${cliChoices})`,
+        existingEnv.DELAY_ALERT_CLI || 'claude'
+    )).toLowerCase();
+
     console.log('\n  System Configuration\n');
 
     const logLevel = await ask('Log level (debug/info/warn/error)', existingEnv.LOG_LEVEL || 'info');
@@ -178,6 +156,8 @@ async function main() {
         SLACK_CLAUDE_COMMAND: claudeCommand,
         SLACK_WHITELIST: whitelist,
         SLACK_HTTP_PORT: httpPort,
+        ALERT_CLI: alertCli,
+        DELAY_ALERT_CLI: delayAlertCli,
         LOG_LEVEL: logLevel
     };
 
@@ -185,15 +165,22 @@ async function main() {
     const savedPath = writeEnvFile(envValues, existingEnv);
     console.log(`  .env saved to ${savedPath}`);
 
-    const updateHooks = await askYesNo('Update ~/.claude/settings.json hooks?', true);
+    const updateHooks = await askYesNo('Update CLI hooks (Claude + Codex)?', true);
     if (updateHooks) {
-        const { settingsPath, backupPath } = ensureHooksFile();
-        if (backupPath) {
-            console.log(`  Warning: backed up invalid settings to ${backupPath}`);
+        const results = installAllHooks();
+        for (const r of results) {
+            if (r.error) {
+                console.log(`  [${r.type}] failed: ${r.error}`);
+                continue;
+            }
+            console.log(`  [${r.type}] ${r.changed ? 'installed' : 'already installed'} at ${r.path}`);
+            if (r.commands) {
+                for (const [event, cmd] of Object.entries(r.commands)) {
+                    console.log(`    ${event.padEnd(13)} -> ${cmd}`);
+                }
+            }
+            if (r.notifyLine) console.log(`    ${r.notifyLine}`);
         }
-        console.log(`  Hooks configured at ${settingsPath}`);
-        console.log(`    Stop -> ${makeHookCommand('completed')}`);
-        console.log(`    SubagentStop -> ${makeHookCommand('waiting')}`);
     }
 
     rl.close();

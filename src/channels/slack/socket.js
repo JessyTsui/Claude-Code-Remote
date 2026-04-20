@@ -16,6 +16,19 @@ const Logger = require('../../core/logger');
 const AlertMonitor = require('./alert-monitor');
 const DelayAlertMonitor = require('./delay-alert-monitor');
 const { runDailySummary, parseChannelsConfig } = require('../../services/daily-summary');
+const { getCliAdapter, adapterNames } = require('../../cli');
+
+// Alternation like "claude|codex" derived from registered adapters, so adding a
+// new adapter entry auto-enables its keyword in @mention chat regexes below.
+const CLI_NAMES_ALT = adapterNames().join('|');
+const CLI_KEYWORD_RE = new RegExp(`\\bstart\\s+(${CLI_NAMES_ALT})\\b`, 'i');
+const CLI_PREFIX_GROUP = `(?:(?:${CLI_NAMES_ALT})\\s+)?`;
+const ROOT_COMMAND_RE = new RegExp(`start\\s+${CLI_PREFIX_GROUP}(?:from|in)\\s+root\\s*$`, 'i');
+const PROJECT_COMMAND_RE = new RegExp(`(?:start\\s+${CLI_PREFIX_GROUP}(?:from|in)\\s+)?project\\s+(\\S+)(?:\\s+from\\s+root)?`, 'i');
+const START_FROM_RE = new RegExp(`start\\s+${CLI_PREFIX_GROUP}(?:from|in)\\s+(\\S+?)(?:\\s+project)?\\s*$`, 'i');
+// Strips used to remove the CLI/project suffix before sending the prompt to the CLI
+const PROJECT_STRIP_RE = new RegExp(`(?:start\\s+${CLI_PREFIX_GROUP}(?:from|in)\\s+)?project\\s+\\S+(?:\\s+from\\s+root)?[,.]?\\s*`, 'i');
+const START_FROM_STRIP_RE = new RegExp(`start\\s+${CLI_PREFIX_GROUP}(?:from|in)\\s+\\S+?(?:\\s+project)?\\s*$`, 'i');
 
 class SlackSocketHandler {
     constructor(config = {}) {
@@ -112,6 +125,11 @@ class SlackSocketHandler {
         } catch {
             // Column already exists
         }
+        try {
+            this.db.exec("ALTER TABLE sessions ADD COLUMN cli_type TEXT DEFAULT 'claude'");
+        } catch {
+            // Column already exists
+        }
         this.db.exec('CREATE INDEX IF NOT EXISTS idx_claude_session_id ON sessions(claude_session_id)');
 
         // Alert investigation queue — process alerts sequentially to avoid resource contention
@@ -132,10 +150,11 @@ class SlackSocketHandler {
 
         this._stmts = {
             upsert: this.db.prepare(`
-                INSERT INTO sessions (session_key, session_name, channel_id, thread_ts, repo_path, created_at, updated_at, alert_message_ts)
-                VALUES (@session_key, @session_name, @channel_id, @thread_ts, @repo_path, @created_at, @updated_at, @alert_message_ts)
+                INSERT INTO sessions (session_key, session_name, channel_id, thread_ts, repo_path, created_at, updated_at, alert_message_ts, cli_type)
+                VALUES (@session_key, @session_name, @channel_id, @thread_ts, @repo_path, @created_at, @updated_at, @alert_message_ts, @cli_type)
                 ON CONFLICT(session_key) DO UPDATE SET
                     updated_at = @updated_at,
+                    cli_type = @cli_type,
                     claude_session_id = NULL
             `),
             get: this.db.prepare('SELECT * FROM sessions WHERE session_key = ?'),
@@ -188,7 +207,8 @@ class SlackSocketHandler {
             repo_path: session.repoPath,
             created_at: session.createdAt,
             updated_at: Date.now(),
-            alert_message_ts: session.alertMessageTs || null
+            alert_message_ts: session.alertMessageTs || null,
+            cli_type: session.cliType || 'claude'
         });
     }
 
@@ -204,7 +224,8 @@ class SlackSocketHandler {
             lastBotTs: row.last_bot_ts || null,
             alertMessageTs: row.alert_message_ts || null,
             lastUserId: row.last_user_id || null,
-            claudeSessionId: row.claude_session_id || null
+            claudeSessionId: row.claude_session_id || null,
+            cliType: row.cli_type || 'claude'
         };
     }
 
@@ -288,8 +309,10 @@ class SlackSocketHandler {
             }).catch(err => this.logger.error(`Failed to post queue start notice: ${err.message}`));
         }
 
-        // Fire the investigation via the regular command flow
-        this._processCommand(item.channel_id, item.message_ts, item.prompt, null, item.message_ts, item.message_ts)
+        // Fire the investigation via the regular command flow. Queue only holds PagerDuty alerts,
+        // so cliType follows ALERT_CLI (delay alerts bypass the queue).
+        const queueCliType = this.config.alertCli || 'claude';
+        this._processCommand(item.channel_id, item.message_ts, item.prompt, null, item.message_ts, item.message_ts, null, queueCliType)
             .catch(err => {
                 this.logger.error(`Alert queue: failed to start investigation for id=${item.id}: ${err.message}`);
                 this._queueStmts.updateStatus.run('failed', Date.now(), item.id);
@@ -1207,19 +1230,18 @@ ${formatted}`
             ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
             : '';
 
-        // Build prompt — use "execute skill" so Claude invokes the skill directly
+        // Build prompt via the selected CLI adapter (Claude by default; ALERT_CLI opts into a different CLI)
         const permalink = await this._getPermalink(channelId, messageTs);
         const alertSkill = this.config.alertSkill;
-        let prompt;
-        if (alertSkill && permalink) {
-            prompt = `execute ${alertSkill} skill with argument ${permalink}${imageInstruction}`;
-        } else if (alertSkill) {
-            prompt = `execute ${alertSkill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
-        } else if (permalink) {
-            prompt = `Investigate this PagerDuty alert: ${permalink}${imageInstruction}`;
-        } else {
-            prompt = `Investigate this PagerDuty alert: ${text.substring(0, 500)}${imageInstruction}`;
-        }
+        const alertCliType = this.config.alertCli || 'claude';
+        const alertAdapter = getCliAdapter(alertCliType);
+        const prompt = alertAdapter.buildAlertPrompt({
+            skill: alertSkill,
+            permalink,
+            fallbackText: text,
+            imageInstruction,
+            fallbackIntro: 'Investigate this PagerDuty alert',
+        });
 
         // Enqueue for sequential processing — prevents resource contention from concurrent sessions
         const position = this._enqueueAlert({ incidentId, channelId, messageTs, prompt, alertType: 'pagerduty' });
@@ -1290,20 +1312,19 @@ ${formatted}`
             ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
             : '';
 
-        // Build prompt — use "execute skill" so Claude invokes the skill directly
+        // Build prompt via the selected CLI adapter (DELAY_ALERT_CLI opts into a different CLI)
         const text = event.text || '';
         const permalink = await this._getPermalink(channelId, messageTs);
         const skill = this.delayAlertMonitor.skill;
-        let prompt;
-        if (skill && permalink) {
-            prompt = `execute ${skill} skill with argument ${permalink}${imageInstruction}`;
-        } else if (skill) {
-            prompt = `execute ${skill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
-        } else if (permalink) {
-            prompt = `Investigate this Airflow delay alert: ${permalink}${imageInstruction}`;
-        } else {
-            prompt = `Investigate this Airflow delay alert: ${text.substring(0, 500)}${imageInstruction}`;
-        }
+        const delayCliType = this.config.delayAlertCli || 'claude';
+        const delayAdapter = getCliAdapter(delayCliType);
+        const prompt = delayAdapter.buildAlertPrompt({
+            skill,
+            permalink,
+            fallbackText: text,
+            imageInstruction,
+            fallbackIntro: 'Investigate this Airflow delay alert',
+        });
 
         // Reset counter after triggering (so it can accumulate again)
         this.delayAlertMonitor.resetCounter(alertInfo.dag);
@@ -1314,7 +1335,7 @@ ${formatted}`
         );
 
         // Use the regular command flow — messageTs as threadTs
-        await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
+        await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs, null, delayCliType);
     }
 
     async _getPermalink(channelId, messageTs) {
@@ -1359,7 +1380,7 @@ ${formatted}`
 
     // ─── Command Processing ──────────────────────────────────────────
 
-    async _processCommand(channelId, threadTs, command, say, messageTs, alertMessageTs = null, userId = null) {
+    async _processCommand(channelId, threadTs, command, say, messageTs, alertMessageTs = null, userId = null, cliTypeHint = null) {
         // Create a say function if one wasn't provided (e.g. alert triggers)
         if (!say) {
             say = async (msg) => {
@@ -1370,9 +1391,10 @@ ${formatted}`
         let session = this._getSession(sessionKey);
         let threadContext = null; // Will hold formatted thread messages to prepend
 
-        // Guard: slash commands on dead/missing sessions
+        // Guard: slash commands on dead/missing sessions (user @mentions only;
+        // alert flows auto-generate `/<skill>` as the first prompt of a new session).
         const isLiveSession = session && this._isTmuxSessionAlive(session.sessionName);
-        if (command.startsWith('/') && !isLiveSession && !(command === '/exit' && session)) {
+        if (command.startsWith('/') && !isLiveSession && !(command === '/exit' && session) && !cliTypeHint) {
             const cmd = command.split(/\s/)[0];
             await say({ text: `Session expired. \`${cmd}\` requires an active session — send a message first to start a new one, then use \`${cmd}\`.`, thread_ts: threadTs });
             return;
@@ -1387,15 +1409,18 @@ ${formatted}`
                 // No thread context needed — Claude is already in the conversation
                 this.logger.info(`Existing live session ${session.sessionName}, injecting command directly`);
             } else if (session && !this._isTmuxSessionAlive(session.sessionName)) {
-                // Session in DB but tmux died — recreate with original repo path
-                this.logger.warn(`Tmux session ${session.sessionName} is dead, recreating in ${session.repoPath}...`);
-                await say({ text: `Resuming Claude session in \`${session.repoPath}\`... :rocket:`, thread_ts: threadTs });
+                // Session in DB but tmux died — recreate with original repo path + original CLI
+                const resumeCliType = session.cliType || 'claude';
+                const resumeAdapter = getCliAdapter(resumeCliType);
+                this.logger.warn(`Tmux session ${session.sessionName} is dead, recreating in ${session.repoPath} (cli=${resumeCliType})...`);
+                await say({ text: `Resuming ${resumeCliType} session in \`${session.repoPath}\`... :rocket:`, thread_ts: threadTs });
 
                 const created = await this._createTmuxSession(
                     session.sessionName,
                     session.repoPath,
-                    this.config.claudeCommand || 'claude --dangerously-skip-permissions',
-                    sessionKey
+                    resumeAdapter.buildLaunchCommand(session.sessionName, session.repoPath, sessionKey),
+                    sessionKey,
+                    resumeCliType
                 );
                 if (!created) {
                     await say({ text: 'Failed to create Claude session. Is tmux installed?', thread_ts: threadTs });
@@ -1421,25 +1446,27 @@ ${formatted}`
             } else {
                 // Brand new conversation
                 const sessionName = this._generateSessionName(channelId, threadTs);
-                const claudeCmd = this.config.claudeCommand || 'claude --dangerously-skip-permissions';
 
-                // Resolve repo path — check for project name patterns
-                // Supported: "start [claude] from root" (uses SLACK_REPO_ROOT directly),
-                //            "project XXX from root", "start [claude] from XXX project",
-                //            "start [claude] from XXX", "start [claude] in XXX project", etc.
+                // Resolve CLI: alert handlers pass a hint; @mention chat detects per-message
+                // keyword (`start codex from …`). Defaults to 'claude' when neither is set.
+                const cliKeywordMatch = !cliTypeHint && command.match(CLI_KEYWORD_RE);
+                const cliType = cliTypeHint || (cliKeywordMatch ? cliKeywordMatch[1].toLowerCase() : 'claude');
+                const adapter = getCliAdapter(cliType);
+
+                // Resolve repo path — check for project name patterns.
+                // Supported:  "start [cli] from root" → uses SLACK_REPO_ROOT directly
+                //             "project XXX from root", "start [cli] from XXX project"
+                //             "start [cli] from XXX", "start [cli] in XXX project"
+                // The `[cli]` slot accepts any registered adapter name (see CLI_NAMES_ALT).
                 let repoPath = this.config.repoPath || process.cwd();
-                const rootMatch = command.match(/start\s+(?:claude\s+)?(?:from|in)\s+root\s*$/i);
+                const rootMatch = command.match(ROOT_COMMAND_RE);
                 const projectMatch = !rootMatch && (
-                    command.match(
-                        /(?:start\s+(?:claude\s+)?(?:from|in)\s+)?project\s+(\S+)(?:\s+from\s+root)?/i
-                    ) || command.match(
-                        /start\s+(?:claude\s+)?(?:from|in)\s+(\S+?)(?:\s+project)?\s*$/i
-                    )
+                    command.match(PROJECT_COMMAND_RE) || command.match(START_FROM_RE)
                 );
                 if (rootMatch) {
                     if (this.config.repoRoot) {
                         repoPath = this.config.repoRoot;
-                        command = command.replace(/start\s+(?:claude\s+)?(?:from|in)\s+root\s*$/i, '').trim();
+                        command = command.replace(ROOT_COMMAND_RE, '').trim();
                         this.logger.info(`Using repo root: ${repoPath}`);
                     } else {
                         await say({ text: '`SLACK_REPO_ROOT` is not configured. Set it in `.env`.', thread_ts: threadTs });
@@ -1450,10 +1477,10 @@ ${formatted}`
                     const candidatePath = path.join(this.config.repoRoot, projectName);
                     if (fs.existsSync(candidatePath)) {
                         repoPath = candidatePath;
-                        // Strip the project resolution part so Claude gets a clean prompt
+                        // Strip the project resolution part so the CLI gets a clean prompt
                         command = command
-                            .replace(/(?:start\s+(?:claude\s+)?(?:from|in)\s+)?project\s+\S+(?:\s+from\s+root)?[,.]?\s*/i, '')
-                            .replace(/start\s+(?:claude\s+)?(?:from|in)\s+\S+?(?:\s+project)?\s*$/i, '')
+                            .replace(PROJECT_STRIP_RE, '')
+                            .replace(START_FROM_STRIP_RE, '')
                             .trim();
                         this.logger.info(`Resolved project "${projectName}" to ${repoPath}`);
                     } else {
@@ -1464,6 +1491,8 @@ ${formatted}`
                     await say({ text: '`SLACK_REPO_ROOT` is not configured. Set it in `.env` to use project switching.', thread_ts: threadTs });
                     return;
                 }
+
+                const cliCmd = adapter.buildLaunchCommand(sessionName, repoPath, sessionKey);
 
                 // If no project detected from command, check if this is a thread continuation
                 // and use Gemini to detect the project from thread history
@@ -1485,16 +1514,16 @@ ${formatted}`
                 }
 
                 if (!alertMessageTs) {
-                    await say({ text: `Starting Claude session in \`${repoPath}\`... :rocket:`, thread_ts: threadTs });
+                    await say({ text: `Starting ${cliType} session in \`${repoPath}\`... :rocket:`, thread_ts: threadTs });
                 }
 
-                const created = await this._createTmuxSession(sessionName, repoPath, claudeCmd, sessionKey);
+                const created = await this._createTmuxSession(sessionName, repoPath, cliCmd, sessionKey, cliType);
                 if (!created) {
                     if (alertMessageTs) {
                         await this._removeReaction(channelId, alertMessageTs, 'eyes');
                         await this._addReaction(channelId, alertMessageTs, 'x');
                     } else {
-                        await say({ text: 'Failed to create Claude session. Is tmux installed?', thread_ts: threadTs });
+                        await say({ text: `Failed to create ${cliType} session. Is tmux installed?`, thread_ts: threadTs });
                     }
                     return;
                 }
@@ -1505,7 +1534,8 @@ ${formatted}`
                     threadTs,
                     repoPath,
                     createdAt: Date.now(),
-                    alertMessageTs: alertMessageTs || null
+                    alertMessageTs: alertMessageTs || null,
+                    cliType
                 };
                 this._saveSession(session);
                 if (userId) this._updateLastUserId(`${channelId}-${threadTs}`, userId);
@@ -1528,7 +1558,7 @@ ${formatted}`
             if (command === '/exit') {
                 if (this._isTmuxSessionAlive(session.sessionName)) {
                     try {
-                        await this._injectCommand(session.sessionName, command);
+                        await this._injectCommand(session.sessionName, command, session.cliType);
                     } catch {
                         // Expected — /exit kills the session before Enter-retry finishes
                     }
@@ -1563,7 +1593,7 @@ ${formatted}`
 
             // Inject the command into the tmux session
             try {
-                await this._injectCommand(session.sessionName, fullCommand);
+                await this._injectCommand(session.sessionName, fullCommand, session.cliType);
             } catch (injectError) {
                 this.logger.error(`Injection failed for ${session.sessionName}: ${injectError.message}`);
                 if (session.alertMessageTs) {
@@ -1591,7 +1621,7 @@ ${formatted}`
                 }
             }
 
-            // Regular sessions: response posting is handled by claude-hook-notify.js (Stop hook)
+            // Regular sessions: response posting is handled by cli-hook-notify.js (Stop / Codex notify)
             // which reads the transcript for clean markdown output.
             // Alert sessions: start the poller to swap reactions (👀→✅) when Claude finishes.
             // The hook handles final posting — no stall detection needed.
@@ -1627,7 +1657,7 @@ ${formatted}`
         }
     }
 
-    async _createTmuxSession(sessionName, repoPath, claudeCmd, sessionKey = null) {
+    async _createTmuxSession(sessionName, repoPath, cliCmd, sessionKey = null, cliType = 'claude') {
         try {
             execSync('which tmux', { stdio: 'ignore' });
         } catch {
@@ -1645,8 +1675,8 @@ ${formatted}`
 
         return new Promise((resolve) => {
             const { buildTmuxCommand } = require('../../utils/tmux-helper');
-            const cmd = buildTmuxCommand(sessionName, repoPath, claudeCmd, sessionKey);
-            this.logger.info(`Creating tmux session: ${cmd}`);
+            const cmd = buildTmuxCommand(sessionName, repoPath, cliCmd, sessionKey, cliType);
+            this.logger.info(`Creating tmux session (cli=${cliType}): ${cmd}`);
 
             exec(cmd, (error) => {
                 if (error) {
@@ -1687,9 +1717,15 @@ ${formatted}`
         });
     }
 
-    async _injectCommand(sessionName, command) {
+    async _injectCommand(sessionName, command, cliType = 'claude') {
         const os = require('os');
-        const tmpFile = path.join(os.tmpdir(), `claude-inject-${sessionName}-${Date.now()}.txt`);
+        const adapter = getCliAdapter(cliType);
+        const indicatorHit = (text) => {
+            const lower = (text || '').toLowerCase();
+            if (adapter.workingIndicators.some(ind => lower.includes(ind))) return true;
+            return (adapter.workingRegexes || []).some(re => re.test(lower));
+        };
+        const tmpFile = path.join(os.tmpdir(), `cli-inject-${sessionName}-${Date.now()}.txt`);
         try {
             // Write command to temp file to avoid shell argument length limits
             fs.writeFileSync(tmpFile, command);
@@ -1711,7 +1747,7 @@ ${formatted}`
                 execSync(`tmux load-buffer ${tmpFile}`);
                 execSync(`tmux paste-buffer -t ${sessionName}`);
 
-                // Wait for Claude Code to process the bracketed paste
+                // Wait for the TUI to process the bracketed paste
                 const baseDelay = 1000;
                 const perLineDelay = Math.min(command.split('\n').length * 100, 3000);
                 await new Promise(r => setTimeout(r, baseDelay + perLineDelay));
@@ -1719,13 +1755,10 @@ ${formatted}`
                 // Verify paste appeared in the pane — check multiple indicators:
                 // 1. Claude shows "[Pasted text" banner for multi-line pastes
                 // 2. The first line of the command appears in the visible pane
-                // 3. Claude already started working (paste + auto-submit succeeded)
+                // 3. The CLI already started working (paste + auto-submit succeeded)
                 const output = this._captureOutput(sessionName);
                 const firstLine = command.split('\n')[0].substring(0, 40);
-                const workingIndicators = ['brewing', 'thinking', 'working', 'clauding',
-                    'flibbertigibbeting', 'esc to interrupt', '● skill(', 'crunching'];
-                const outputLower = output.toLowerCase();
-                const isAlreadyWorking = workingIndicators.some(ind => outputLower.includes(ind));
+                const isAlreadyWorking = indicatorHit(output);
                 if (output.includes('Pasted text') || output.includes(firstLine) || isAlreadyWorking) {
                     if (attempt > 0) {
                         this.logger.info(`Paste landed on attempt ${attempt + 1} for ${sessionName}${isAlreadyWorking ? ' (already working)' : ''}`);
@@ -1739,12 +1772,10 @@ ${formatted}`
             }
 
             if (!pasteLanded) {
-                throw new Error(`Paste failed after ${pasteMaxAttempts} attempts — Claude may not be ready`);
+                throw new Error(`Paste failed after ${pasteMaxAttempts} attempts — ${cliType} may not be ready`);
             }
 
-            // Send Enter and verify Claude started processing.
-            const workingIndicators = ['brewing', 'thinking', 'working', 'clauding',
-                'flibbertigibbeting', 'esc to interrupt', '● skill(', 'crunching'];
+            // Send Enter and verify the CLI started processing.
             const maxAttempts = 5;
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 execSync(`tmux send-keys -t ${sessionName} Enter`);
@@ -1753,8 +1784,8 @@ ${formatted}`
                 await new Promise(r => setTimeout(r, waitMs));
 
                 const output = this._captureOutput(sessionName);
-                const isWorking = workingIndicators.some(ind => output.toLowerCase().includes(ind));
-                // Also check if Claude already finished (prompt visible again) — means it
+                const isWorking = indicatorHit(output);
+                // Also check if the CLI already finished (prompt visible again) — means it
                 // processed the command very quickly (e.g. "hi") before we could detect working state
                 const hasPrompt = /^[)❯>]\s*$/m.test(output);
                 if (isWorking) {
@@ -1817,7 +1848,8 @@ ${formatted}`
         const { sessionName, threadTs } = session;
         const pollKey = sessionName;
         const isAlertSession = !!session.alertMessageTs;
-        this.logger.info(`Poller starting for ${sessionName} (alert=${isAlertSession})`);
+        const adapter = getCliAdapter(session.cliType || 'claude');
+        this.logger.info(`Poller starting for ${sessionName} (alert=${isAlertSession}, cli=${adapter.type})`);
         let isFirstResponse = isAlertSession; // only true for the very first response of an alert
         let alertBuffer = '';
         let alertAccumulationCount = 0;
@@ -1921,23 +1953,12 @@ ${formatted}`
             // the status bar can show stale "thinking" even when Claude is idle.
             const nonStatusLines = wideLines.filter(l => !l.includes('[OMC#'));
             const tailText = nonStatusLines.join(' ').toLowerCase();
-            // Keyword check — keep in sync with workingIndicators in _injectCommand.
-            // Claude Code uses many random verbs (Burrowing, Metamorphosing, etc.)
-            // so also match its timer pattern "(Ns · ↓" which always appears.
+            // Working-state detection comes from the adapter so each CLI has its own
+            // indicator set (Claude Code rotates verbs like "Burrowing" / "Metamorphosing";
+            // Codex uses a different spinner vocabulary).
             const isWorking =
-                tailText.includes('clauding') ||
-                tailText.includes('working') ||
-                tailText.includes('processing') ||
-                tailText.includes('⏳') ||
-                tailText.includes('thinking') ||
-                tailText.includes('crunching') ||
-                tailText.includes('brewing') ||
-                tailText.includes('metamorphosing') ||
-                tailText.includes('flibbertigibbeting') ||
-                tailText.includes('burrowing') ||
-                tailText.includes('esc to interrupt') ||
-                tailText.includes('running…') ||
-                /\(\d+[sm]\d*s?\s+·\s+↓/.test(tailText);
+                adapter.workingIndicators.some(ind => tailText.includes(ind)) ||
+                (adapter.workingRegexes || []).some(re => re.test(tailText));
 
             if (attempts % 10 === 0) {
                 const lastFiveLines = lines.slice(-5).map(l => l.trim()).join(' | ');
@@ -1975,7 +1996,7 @@ ${formatted}`
 
                             if (hasCompletionMarker || alertAccumulationCount >= 5) {
                                 // Completion detected — stop poller. Posting is handled by
-                                // claude-hook-notify.js (Stop hook) which reads the clean transcript.
+                                // cli-hook-notify.js (Stop / Codex notify) which reads the clean transcript.
                                 const reason = hasCompletionMarker ? 'completion marker found' : `fallback after ${alertAccumulationCount} cycles`;
                                 this.logger.info(`Alert poller done (${reason}): ${alertBuffer.length} chars for ${sessionName} — hook will post`);
                                 isFirstResponse = false;
@@ -2030,9 +2051,8 @@ ${formatted}`
                     return;
                 }
 
-                if (currentOutput.includes('Do you want to proceed?') ||
-                    currentOutput.includes('(y/n)') ||
-                    currentOutput.includes('1. Yes')) {
+                if (adapter.handlesConfirmationPrompts &&
+                    (adapter.confirmationPrompts || []).some(p => currentOutput.includes(p))) {
                     this._autoApprove(sessionName, currentOutput);
                     stableCount = 0;
                 }
@@ -2770,22 +2790,21 @@ ${formatted}`
                     ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
                     : '';
 
-                // Build prompt — use "execute skill" so Claude invokes the skill directly
+                // Build prompt via the selected CLI adapter
                 const permalink = await this._getPermalink(channelId, messageTs);
                 const alertSkill = this.config.alertSkill;
-                let prompt;
-                if (alertSkill && permalink) {
-                    prompt = `execute ${alertSkill} skill with argument ${permalink}${imageInstruction}`;
-                } else if (alertSkill) {
-                    prompt = `execute ${alertSkill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
-                } else if (permalink) {
-                    prompt = `Investigate this alert: ${permalink}${imageInstruction}`;
-                } else {
-                    prompt = `Investigate this alert: ${text.substring(0, 500)}${imageInstruction}`;
-                }
+                const triggerCliType = this.config.alertCli || 'claude';
+                const triggerAdapter = getCliAdapter(triggerCliType);
+                const prompt = triggerAdapter.buildAlertPrompt({
+                    skill: alertSkill,
+                    permalink,
+                    fallbackText: text,
+                    imageInstruction,
+                    fallbackIntro: 'Investigate this alert',
+                });
 
                 // Manual trigger — bypass queue, process immediately
-                await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
+                await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs, null, triggerCliType);
                 res.json({ status: 'investigating', channelId, messageTs });
             } catch (error) {
                 this.logger.error(`Trigger alert error: ${error.message}`);
@@ -2844,19 +2863,18 @@ ${formatted}`
                     ? ` Attached images (read these files for visual context): ${imagePaths.join(' ')}`
                     : '';
 
-                // Build prompt using the delay alert skill
+                // Build prompt via the selected CLI adapter (DELAY_ALERT_CLI opts into a different CLI)
                 const permalink = await this._getPermalink(channelId, messageTs);
                 const skill = this.delayAlertMonitor.skill;
-                let prompt;
-                if (skill && permalink) {
-                    prompt = `execute ${skill} skill with argument ${permalink}${imageInstruction}`;
-                } else if (skill) {
-                    prompt = `execute ${skill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
-                } else if (permalink) {
-                    prompt = `Investigate this Airflow delay alert: ${permalink}${imageInstruction}`;
-                } else {
-                    prompt = `Investigate this Airflow delay alert: ${text.substring(0, 500)}${imageInstruction}`;
-                }
+                const triggerDelayCliType = this.config.delayAlertCli || 'claude';
+                const triggerDelayAdapter = getCliAdapter(triggerDelayCliType);
+                const prompt = triggerDelayAdapter.buildAlertPrompt({
+                    skill,
+                    permalink,
+                    fallbackText: text,
+                    imageInstruction,
+                    fallbackIntro: 'Investigate this Airflow delay alert',
+                });
 
                 // DM owner that investigation is starting (manual trigger)
                 const alertInfo = this.delayAlertMonitor.extractAlertInfo(message);
@@ -2870,7 +2888,7 @@ ${formatted}`
                 );
 
                 // Use the regular command flow
-                await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs);
+                await this._processCommand(channelId, messageTs, prompt, null, messageTs, messageTs, null, triggerDelayCliType);
                 res.json({ status: 'investigating', channelId, messageTs, skill: skill || 'none' });
             } catch (error) {
                 this.logger.error(`Trigger delay alert error: ${error.message}`);
@@ -3080,14 +3098,15 @@ ${formatted}`
                         : '';
                     const text = message.text || '';
                     const alertSkill = this.config.alertSkill;
-                    let prompt;
-                    if (alertSkill && permalink) {
-                        prompt = `execute ${alertSkill} skill with argument ${permalink}${imageInstruction}`;
-                    } else if (alertSkill) {
-                        prompt = `execute ${alertSkill} skill with argument Alert: ${text.substring(0, 500)}${imageInstruction}`;
-                    } else {
-                        prompt = `Investigate this PagerDuty alert: ${(permalink || text).substring(0, 500)}${imageInstruction}`;
-                    }
+                    const webhookCliType = this.config.alertCli || 'claude';
+                    const webhookAdapter = getCliAdapter(webhookCliType);
+                    const prompt = webhookAdapter.buildAlertPrompt({
+                        skill: alertSkill,
+                        permalink,
+                        fallbackText: text,
+                        imageInstruction,
+                        fallbackIntro: 'Investigate this PagerDuty alert',
+                    });
 
                     const position = this._enqueueAlert({ incidentId, channelId, messageTs, prompt, alertType: 'pagerduty' });
                     if (position > 0) {
