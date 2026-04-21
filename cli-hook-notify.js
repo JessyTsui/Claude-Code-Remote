@@ -488,123 +488,220 @@ async function sendHookNotification() {
                     return;
                 }
 
-                let alreadyPosted = false;
-                try {
-                    const replies = await web.conversations.replies({
-                        channel: channelId,
-                        ts: threadTs,
-                        limit: 50
-                    });
-                    alreadyPosted = (replies.messages || []).some(m =>
-                        m.ts !== threadTs && m.text?.includes('Recommended Action:')
-                    );
-                } catch {
-                    // proceed
+                // Stash file pattern used to recover state across hook invocations
+                // (each Stop hook spawns a fresh node process, so /tmp is our memory):
+                //   hook-primary-<key>  JSON { ts, fileId } — the canonical alert post
+                //   hook-warning-<key>  ts of an "AI agent unresponsive" warning, if any
+                //   hook-retry-<key>    nudge retry counter
+                const primaryFile = `/tmp/hook-primary-${slackSessionKey}`;
+                const warningFile = `/tmp/hook-warning-${slackSessionKey}`;
+                const retryFile = `/tmp/hook-retry-${slackSessionKey}`;
+
+                let primary = null;
+                try { primary = JSON.parse(fs.readFileSync(primaryFile, 'utf-8')); } catch { /* no prior primary */ }
+
+                // Cold-start recovery: if the stash is empty (service restart, /tmp
+                // cleanup), scan the thread for our earlier primary post so we still
+                // dedupe instead of posting a second alert block.
+                if (!primary) {
+                    try {
+                        const replies = await web.conversations.replies({
+                            channel: channelId, ts: threadTs, limit: 50,
+                        });
+                        const existing = (replies.messages || []).find(m =>
+                            m.ts !== threadTs && typeof m.text === 'string' && m.text.startsWith('Recommended Action:')
+                        );
+                        if (existing) {
+                            primary = { ts: existing.ts, fileId: null };
+                            console.error(`Recovered primary from Slack thread: ts=${existing.ts}`);
+                        }
+                    } catch { /* proceed without recovery */ }
                 }
 
-                if (alreadyPosted) {
-                    console.error(`Alert summary already posted — posting follow-up as regular response`);
-                    await sendResponse(web, channelId, threadTs, assistantMessage, stats, lastUserId);
-                    console.error(`Follow-up response posted (${assistantMessage.length} chars) to ${channelId} thread=${threadTs}`);
-                } else {
-                    let hasValidReport = false;
-                    if (cliSource === 'claude' && hookInput.transcript_path) {
-                        const report = extractAlertReport(hookInput.transcript_path);
-                        if (report) {
-                            console.error(`Alert report found in transcript (${report.length} chars), overriding last_assistant_message (${(assistantMessage || '').length} chars)`);
-                            assistantMessage = report;
-                            hasValidReport = true;
-                        }
-                    }
-
-                    if (!hasValidReport && assistantMessage && assistantMessage.length >= 500
-                        && /(?:^|\n)(?:#{1,3}\s+)?(?:\*\*)?Recommended Action(?:\*\*)?:/im.test(assistantMessage)) {
+                let hasValidReport = false;
+                if (cliSource === 'claude' && hookInput.transcript_path) {
+                    const report = extractAlertReport(hookInput.transcript_path);
+                    if (report) {
+                        console.error(`Alert report found in transcript (${report.length} chars), overriding last_assistant_message (${(assistantMessage || '').length} chars)`);
+                        assistantMessage = report;
                         hasValidReport = true;
                     }
+                }
 
-                    if (hasValidReport) {
-                        try { fs.unlinkSync(`/tmp/hook-retry-${slackSessionKey}`); } catch { /* ignore */ }
-                        const match = assistantMessage.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*)/i);
-                        const summary = match ? match[1].trim() : (
-                            assistantMessage.match(/Recommended Action:\s*(.+(?:\n(?!\n).+)*)/i)?.[1]?.trim()
-                            || assistantMessage.substring(0, 500).trim()
-                        );
+                if (!hasValidReport && assistantMessage && assistantMessage.length >= 500
+                    && /(?:^|\n)(?:#{1,3}\s+)?(?:\*\*)?Recommended Action(?:\*\*)?:/im.test(assistantMessage)) {
+                    hasValidReport = true;
+                }
 
-                        const maxSummaryLen = 2970;
-                        const trimmedSummary = summary.length > maxSummaryLen
-                            ? summary.substring(0, maxSummaryLen) + '…' : summary;
-                        const alertBlocks = [
-                            { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${trimmedSummary}` } }
-                        ];
-                        if (stats) {
-                            const statsLine = `_${stats.model} · Ctx: ${stats.context} · In: ${stats.tokensIn} Out: ${stats.tokensOut}_`;
-                            alertBlocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: statsLine }] });
+                if (hasValidReport) {
+                    try { fs.unlinkSync(retryFile); } catch { /* ignore */ }
+                    const match = assistantMessage.match(/Recommended Action:\s*([\s\S]*?)(?:\n\s*---|\n\n##|\n\n\*\*)/i);
+                    const summary = match ? match[1].trim() : (
+                        assistantMessage.match(/Recommended Action:\s*(.+(?:\n(?!\n).+)*)/i)?.[1]?.trim()
+                        || assistantMessage.substring(0, 500).trim()
+                    );
+
+                    const maxSummaryLen = 2970;
+                    const trimmedSummary = summary.length > maxSummaryLen
+                        ? summary.substring(0, maxSummaryLen) + '…' : summary;
+                    const alertBlocks = [
+                        { type: 'section', text: { type: 'mrkdwn', text: `*Recommended Action:* ${trimmedSummary}` } }
+                    ];
+                    if (stats) {
+                        const statsLine = `_${stats.model} · Ctx: ${stats.context} · In: ${stats.tokensIn} Out: ${stats.tokensOut}_`;
+                        alertBlocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: statsLine }] });
+                    }
+
+                    // Attachment is the "attachment zone" — everything after the first
+                    // `---` separator (skill's two-zone format). Summary is already in
+                    // the inline post above; including it again duplicates the heading.
+                    const sepMatch = assistantMessage.match(/\n\s*---\s*\n/);
+                    const attachmentZone = sepMatch
+                        ? assistantMessage.slice(sepMatch.index + sepMatch[0].length).trim()
+                        : assistantMessage;
+
+                    let postedTs = null;
+                    const isUpdate = !!(primary && primary.ts);
+
+                    if (isUpdate) {
+                        // Claude refined its answer on a later turn. Overwrite the
+                        // existing post in-place so the thread shows one clean message
+                        // instead of competing reports.
+                        try {
+                            await web.chat.update({
+                                channel: channelId,
+                                ts: primary.ts,
+                                text: `Recommended Action: ${summary}`,
+                                blocks: alertBlocks,
+                            });
+                            postedTs = primary.ts;
+                            console.error(`Updated primary alert post ts=${primary.ts} with refined report`);
+                        } catch (err) {
+                            console.error(`chat.update failed (ts=${primary.ts}): ${err.message} — leaving primary as-is`);
                         }
 
-                        await web.chat.postMessage({
+                        if (postedTs && primary.fileId) {
+                            try { await web.files.delete({ file: primary.fileId }); } catch (err) {
+                                console.error(`files.delete failed (${primary.fileId}): ${err.message}`);
+                            }
+                        }
+                    }
+
+                    if (!postedTs) {
+                        const postResult = await web.chat.postMessage({
                             channel: channelId,
                             text: `Recommended Action: ${summary}`,
                             thread_ts: threadTs,
-                            blocks: alertBlocks
+                            blocks: alertBlocks,
                         });
+                        postedTs = postResult?.ts || null;
+                    }
 
-                        // Attachment is the report's "attachment zone" — everything after the
-                        // first `---`. The summary zone is already in the inline post above, so
-                        // including it again would duplicate the heading in the file preview.
-                        // Fall back to the full message if the skill didn't emit a separator.
-                        const sepMatch = assistantMessage.match(/\n\s*---\s*\n/);
-                        const attachmentZone = sepMatch
-                            ? assistantMessage.slice(sepMatch.index + sepMatch[0].length).trim()
-                            : assistantMessage;
-
-                        await web.filesUploadV2({
+                    let uploadedFileId = null;
+                    try {
+                        const uploadResult = await web.filesUploadV2({
                             channel_id: channelId,
                             thread_ts: threadTs,
                             content: attachmentZone,
                             filename: `alert-investigation-${Date.now()}.md`,
                             title: 'Full Investigation Report',
-                            initial_comment: '_Full investigation details attached._',
+                            initial_comment: isUpdate ? '_Updated investigation attached._' : '_Full investigation details attached._',
                         });
+                        uploadedFileId = uploadResult?.files?.[0]?.id
+                            || uploadResult?.files?.[0]?.files?.[0]?.id
+                            || uploadResult?.file?.id
+                            || null;
+                    } catch (err) {
+                        console.error(`filesUploadV2 failed: ${err.message}`);
+                    }
 
-                        markAlertQueueComplete(channelId, alertMessageTs);
-                    } else {
-                        const HOOK_MAX_RETRIES = parseInt(process.env.HOOK_MAX_RETRIES, 10) || 3;
-                        const retryFile = `/tmp/hook-retry-${slackSessionKey}`;
-                        let retryCount = 0;
-                        try { retryCount = parseInt(fs.readFileSync(retryFile, 'utf-8').trim(), 10) || 0; } catch { /* first attempt */ }
-
-                        let tmuxAlive = false;
-                        if (sessionName) {
-                            try {
-                                execSync(`tmux has-session -t ${sessionName} 2>/dev/null`);
-                                tmuxAlive = true;
-                            } catch { /* session dead */ }
+                    if (postedTs) {
+                        try {
+                            fs.writeFileSync(primaryFile, JSON.stringify({ ts: postedTs, fileId: uploadedFileId }));
+                        } catch (err) {
+                            console.error(`Failed to persist primary stash: ${err.message}`);
                         }
+                    }
 
-                        if (tmuxAlive && retryCount < HOOK_MAX_RETRIES) {
-                            retryCount++;
-                            fs.writeFileSync(retryFile, String(retryCount));
-                            console.error(`Alert incomplete (attempt ${retryCount}/${HOOK_MAX_RETRIES}) — nudging CLI in tmux ${sessionName}`);
-                            const nudge = 'Please continue the investigation. Output your final report with a "## Recommended Action" section summarizing what happened and what to do.';
-                            try {
-                                const nudgeTmp = `/tmp/hook-nudge-${Date.now()}.txt`;
-                                fs.writeFileSync(nudgeTmp, nudge);
-                                execSync(`tmux load-buffer ${nudgeTmp} && tmux paste-buffer -t ${sessionName}`);
-                                execSync(`sleep 0.3 && tmux send-keys -t ${sessionName} Enter`);
-                                fs.unlinkSync(nudgeTmp);
-                            } catch (err) {
-                                console.error(`Failed to nudge CLI in tmux: ${err.message}`);
+                    // Clean up any stale "AI agent unresponsive" warning posted earlier
+                    // — once we have a real report, the human-check prompt is obsolete.
+                    try {
+                        const warningTs = fs.readFileSync(warningFile, 'utf-8').trim();
+                        if (warningTs) {
+                            try { await web.chat.delete({ channel: channelId, ts: warningTs }); } catch (err) {
+                                console.error(`chat.delete (warning ts=${warningTs}) failed: ${err.message}`);
                             }
-                            process.exit(0);
+                        }
+                        fs.unlinkSync(warningFile);
+                    } catch { /* no warning posted */ }
+
+                    markAlertQueueComplete(channelId, alertMessageTs);
+                } else {
+                    // No valid report on this Stop.
+                    // If we already have a primary posted, the user has a clean answer —
+                    // stop nudging, stop warning. Subsequent short turns are usually just
+                    // the agent narrating between async tool callbacks.
+                    if (primary && primary.ts) {
+                        console.error(`No valid report in this turn, primary already posted (ts=${primary.ts}) — silent exit`);
+                        return;
+                    }
+
+                    const HOOK_MAX_RETRIES = parseInt(process.env.HOOK_MAX_RETRIES, 10) || 3;
+                    let retryCount = 0;
+                    try { retryCount = parseInt(fs.readFileSync(retryFile, 'utf-8').trim(), 10) || 0; } catch { /* first attempt */ }
+
+                    let tmuxAlive = false;
+                    if (sessionName) {
+                        try {
+                            execSync(`tmux has-session -t ${sessionName} 2>/dev/null`);
+                            tmuxAlive = true;
+                        } catch { /* session dead */ }
+                    }
+
+                    if (tmuxAlive && retryCount < HOOK_MAX_RETRIES) {
+                        retryCount++;
+                        fs.writeFileSync(retryFile, String(retryCount));
+                        console.error(`Alert incomplete (attempt ${retryCount}/${HOOK_MAX_RETRIES}) — nudging CLI in tmux ${sessionName}`);
+                        const nudge = 'Please continue the investigation. Output your final report with a "## Recommended Action" section summarizing what happened and what to do.';
+                        try {
+                            const nudgeTmp = `/tmp/hook-nudge-${Date.now()}.txt`;
+                            fs.writeFileSync(nudgeTmp, nudge);
+                            execSync(`tmux load-buffer ${nudgeTmp} && tmux paste-buffer -t ${sessionName}`);
+                            execSync(`sleep 0.3 && tmux send-keys -t ${sessionName} Enter`);
+                            fs.unlinkSync(nudgeTmp);
+                        } catch (err) {
+                            console.error(`Failed to nudge CLI in tmux: ${err.message}`);
+                        }
+                        process.exit(0);
+                    }
+
+                    if (tmuxAlive) {
+                        // Retries exhausted but the session is still alive. The AI agent
+                        // may be waiting on async tool callbacks (Monitor, background
+                        // Bash) and could still produce a report. Post a single
+                        // human-check warning, then silently exit on subsequent Stops —
+                        // don't reset the counter and don't keep nudging.
+                        let alreadyWarned = false;
+                        try { fs.accessSync(warningFile); alreadyWarned = true; } catch { /* first warn */ }
+                        if (alreadyWarned) {
+                            console.error(`Retries exhausted, tmux alive, warning already posted — silent exit`);
+                            return;
                         }
 
-                        try { fs.unlinkSync(retryFile); } catch { /* ignore */ }
-                        console.error(`No valid alert report found after ${retryCount} retries (assistantMessage: ${(assistantMessage || '').length} chars) — posting incomplete notice`);
-                        await web.chat.postMessage({
-                            channel: channelId,
-                            text: ':warning: Investigation incomplete — session exited before producing a report.',
-                            thread_ts: threadTs,
-                        });
+                        try {
+                            const warnResult = await web.chat.postMessage({
+                                channel: channelId,
+                                text: ':warning: Session is still alive but no report was received from the AI agent ' +
+                                      `after ${HOOK_MAX_RETRIES} attempts. Please check the tmux session manually.`,
+                                thread_ts: threadTs,
+                            });
+                            if (warnResult?.ts) {
+                                fs.writeFileSync(warningFile, warnResult.ts);
+                            }
+                            console.error(`Posted AI-agent-unresponsive warning after ${retryCount} retries (tmux alive)`);
+                        } catch (err) {
+                            console.error(`Failed to post warning: ${err.message}`);
+                        }
 
                         if (assistantMessage) {
                             try {
@@ -621,10 +718,36 @@ async function sendHookNotification() {
                             }
                         }
 
-                        markAlertQueueComplete(channelId, alertMessageTs);
+                        // Do NOT mark the queue complete — the session is still alive.
+                        return;
                     }
 
-                    console.error(`Alert response posted (${assistantMessage.length} chars) to ${channelId} thread=${threadTs}`);
+                    // tmux is genuinely gone → definitive incomplete notice.
+                    try { fs.unlinkSync(retryFile); } catch { /* ignore */ }
+                    try { fs.unlinkSync(warningFile); } catch { /* ignore */ }
+                    console.error(`tmux session dead, no valid report (assistantMessage: ${(assistantMessage || '').length} chars) — posting final incomplete notice`);
+                    await web.chat.postMessage({
+                        channel: channelId,
+                        text: ':warning: Investigation incomplete — tmux session ended before a report was produced.',
+                        thread_ts: threadTs,
+                    });
+
+                    if (assistantMessage) {
+                        try {
+                            await web.filesUploadV2({
+                                channel_id: channelId,
+                                thread_ts: threadTs,
+                                content: assistantMessage,
+                                filename: `alert-raw-output-${Date.now()}.txt`,
+                                title: 'Raw CLI Output (debug)',
+                                initial_comment: '_Raw output attached for debugging._',
+                            });
+                        } catch (err) {
+                            console.error(`Failed to upload raw debug output: ${err.message}`);
+                        }
+                    }
+
+                    markAlertQueueComplete(channelId, alertMessageTs);
                 }
             } else {
                 await sendResponse(web, channelId, threadTs, assistantMessage, stats, lastUserId);
