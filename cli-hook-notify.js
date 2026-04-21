@@ -548,11 +548,20 @@ async function sendHookNotification() {
                             blocks: alertBlocks
                         });
 
+                        // Attachment is the report's "attachment zone" — everything after the
+                        // first `---`. The summary zone is already in the inline post above, so
+                        // including it again would duplicate the heading in the file preview.
+                        // Fall back to the full message if the skill didn't emit a separator.
+                        const sepMatch = assistantMessage.match(/\n\s*---\s*\n/);
+                        const attachmentZone = sepMatch
+                            ? assistantMessage.slice(sepMatch.index + sepMatch[0].length).trim()
+                            : assistantMessage;
+
                         await web.filesUploadV2({
                             channel_id: channelId,
                             thread_ts: threadTs,
-                            content: assistantMessage,
-                            filename: `alert-investigation-${Date.now()}.txt`,
+                            content: attachmentZone,
+                            filename: `alert-investigation-${Date.now()}.md`,
                             title: 'Full Investigation Report',
                             initial_comment: '_Full investigation details attached._',
                         });
