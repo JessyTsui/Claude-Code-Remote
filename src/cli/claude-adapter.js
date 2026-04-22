@@ -118,6 +118,17 @@ module.exports = {
         '1. Yes'
     ],
 
+    // Patterns that indicate the CLI is stalled and can't continue without
+    // user intervention. When matched, the poller pings the owner in the
+    // Slack thread so they can unblock (e.g. by sending /compact).
+    stalledPatterns: [
+        {
+            regex: /Context limit reached/i,
+            reason: 'context_limit',
+            hint: 'Claude hit its context limit. Send `/compact` to compact the conversation, or `/clear` to start fresh.',
+        }
+    ],
+
     // Whether _injectCommand + poller should auto-approve confirmation dialogs.
     handlesConfirmationPrompts: true,
 

@@ -2185,6 +2185,72 @@ ${formatted}`
     }
 
     /**
+     * Stall monitor — scans all live sessions every N seconds for adapter-defined
+     * stall patterns (e.g. Claude's "Context limit reached · /compact or /clear").
+     * When matched, pings the owner in the session's thread so they can unblock.
+     *
+     * Runs for ALL sessions (regular + alert). The in-turn poller in
+     * `_pollForResponse` only runs for alert sessions and only while Claude's
+     * turn is active — a context-limit stall happens when the turn is frozen,
+     * so neither that poller nor the Stop hook fire. This monitor is the single
+     * source of truth for stall detection.
+     */
+    _startStallMonitor() {
+        const INTERVAL_MS = 15 * 1000; // 15s — fast enough to alert early, slow enough not to thrash
+        this._stallState = this._stallState || new Map(); // sessionKey -> { notified: boolean, reason: string }
+
+        this._stallMonitorInterval = setInterval(async () => {
+            let sessions;
+            try {
+                sessions = this._getAllSessions();
+            } catch (err) {
+                this.logger.error(`Stall monitor: failed to list sessions: ${err.message}`);
+                return;
+            }
+
+            for (const s of sessions) {
+                try {
+                    if (!this._isTmuxSessionAlive(s.sessionName)) {
+                        this._stallState.delete(s.sessionKey);
+                        continue;
+                    }
+                    const adapter = getCliAdapter(s.cliType || 'claude');
+                    const patterns = adapter.stalledPatterns || [];
+                    if (patterns.length === 0) continue;
+
+                    const output = this._captureOutput(s.sessionName);
+                    const match = patterns.find(p => p.regex.test(output));
+                    const state = this._stallState.get(s.sessionKey) || { notified: false };
+
+                    if (match && !state.notified) {
+                        this._stallState.set(s.sessionKey, { notified: true, reason: match.reason });
+                        this.logger.warn(`Stall detected (${match.reason}) on ${s.sessionName} — notifying thread ${s.threadTs}`);
+                        const ownerId = this.config.ownerUserId;
+                        const mention = ownerId ? `<@${ownerId}> ` : '';
+                        const text = `${mention}:warning: ${match.hint || `${adapter.type} is stalled and needs input to continue.`}`;
+                        try {
+                            await this.app.client.chat.postMessage({
+                                channel: s.channelId,
+                                text,
+                                thread_ts: s.threadTs,
+                            });
+                        } catch (err) {
+                            this.logger.error(`Stall monitor: failed to post notice for ${s.sessionName}: ${err.message}`);
+                            // Don't keep notified=true if the post failed — allow retry next tick
+                            this._stallState.set(s.sessionKey, { notified: false });
+                        }
+                    } else if (!match && state.notified) {
+                        this._stallState.set(s.sessionKey, { notified: false });
+                        this.logger.info(`Stall cleared on ${s.sessionName} — re-armed`);
+                    }
+                } catch (err) {
+                    this.logger.error(`Stall monitor: error checking ${s.sessionName}: ${err.message}`);
+                }
+            }
+        }, INTERVAL_MS);
+    }
+
+    /**
      * After startup, scan recent messages in all relevant channels for @mentions
      * that the bot never replied to. Replays them as if they just arrived.
      * Covers events dropped during restart / Socket Mode reconnection.
@@ -3228,6 +3294,7 @@ ${formatted}`
         // Reconcile DB sessions with live tmux sessions
         await this._reconcileSessions();
         this._startSessionSweep();
+        this._startStallMonitor();
         this.logger.info(`[startup] reconcileSessions: ${Date.now() - t0}ms`);
 
         const t1 = Date.now();
@@ -3258,6 +3325,11 @@ ${formatted}`
         if (this._sweepInterval) {
             clearInterval(this._sweepInterval);
             this._sweepInterval = null;
+        }
+
+        if (this._stallMonitorInterval) {
+            clearInterval(this._stallMonitorInterval);
+            this._stallMonitorInterval = null;
         }
 
         if (this._healthCheckInterval) {
